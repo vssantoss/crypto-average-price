@@ -8,6 +8,10 @@ The app is designed for local use with personal financial data. Imported files a
 
 This software is provided as is for personal recordkeeping and calculation assistance. It is not tax, legal, accounting, or financial advice, and it is not guaranteed to comply with the official tax rules, reporting requirements, or calculation methods of any country or jurisdiction. Review all results carefully and consult a qualified professional before using them for tax filings or official reporting.
 
+## Project Status
+
+This app is a work in progress and is not even an alpha release. It may contain incomplete features, incorrect calculations, missing edge-case handling, or behavior that changes without notice. Do not rely on it as an authoritative source until you have independently verified the results.
+
 ## Features
 
 - Import one or more Crypto.com transaction report CSV files.
