@@ -1,0 +1,407 @@
+import { useState } from 'react'
+import { useAppStore } from '../../store/useAppStore'
+import { useExchangeList } from '../../store/selectors'
+import { JournalType } from '../../types/transaction'
+import type { CryptoComRow, TradeSide } from '../../types/transaction'
+import { Dialog } from '../common/Dialog'
+import { X } from 'lucide-react'
+
+interface AddRowDialogProps {
+  open: boolean
+  onClose: () => void
+  editRow?: CryptoComRow | null
+}
+
+const journalTypes = Object.values(JournalType)
+
+/**
+ * Builds the current UTC timestamp in the app's CSV time format.
+ * @returns Current UTC time as MM/DD/YYYY HH:MM:SS
+ */
+function nowUtcString(): string {
+  const d = new Date()
+  const mo = String(d.getUTCMonth() + 1).padStart(2, '0')
+  const day = String(d.getUTCDate()).padStart(2, '0')
+  const y = d.getUTCFullYear()
+  const h = String(d.getUTCHours()).padStart(2, '0')
+  const mi = String(d.getUTCMinutes()).padStart(2, '0')
+  const s = String(d.getUTCSeconds()).padStart(2, '0')
+  return `${mo}/${day}/${y} ${h}:${mi}:${s}`
+}
+
+/**
+ * Converts a CSV timestamp into the event date used by transaction rows.
+ * @param timeUtc - Timestamp in MM/DD/YYYY HH:MM:SS format
+ * @returns Date string as YYYY-MM-DD, or an empty string when invalid
+ */
+function timeToEventDate(timeUtc: string): string {
+  const parts = timeUtc.trim().split(' ')[0].split('/')
+  if (parts.length !== 3) return ''
+  return `${parts[2]}-${parts[0].padStart(2, '0')}-${parts[1].padStart(2, '0')}`
+}
+
+/**
+ * Parses a time string in 24h or 12h (AM/PM) format and returns the date parts.
+ * Returns null if the string is not a valid date.
+ */
+function parseDateTime(timeUtc: string): { y: number; mo: number; d: number; h: number; mi: number; s: number } | null {
+  const str = timeUtc.trim()
+  // Try 24h: MM/DD/YYYY HH:MM:SS
+  let match = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{2}):(\d{2})$/)
+  if (match) {
+    const [, mo, d, y, h, mi, s] = match.map(Number)
+    return { y, mo, d, h, mi, s }
+  }
+  // Try 12h: MM/DD/YYYY HH:MM:SS AM/PM
+  match = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{2}):(\d{2})\s*(AM|PM)$/i)
+  if (match) {
+    const [, moS, dS, yS, hS, miS, sS, ampm] = match
+    let h = Number(hS)
+    const mo = Number(moS), d = Number(dS), y = Number(yS), mi = Number(miS), s = Number(sS)
+    if (h < 1 || h > 12) return null
+    if (ampm.toUpperCase() === 'PM' && h !== 12) h += 12
+    if (ampm.toUpperCase() === 'AM' && h === 12) h = 0
+    return { y, mo, d, h, mi, s }
+  }
+  return null
+}
+
+/**
+ * Validates that a date string is a real date in MM/DD/YYYY HH:MM:SS or MM/DD/YYYY HH:MM:SS AM/PM format.
+ */
+function isValidDate(timeUtc: string): boolean {
+  const p = parseDateTime(timeUtc)
+  if (!p) return false
+  const date = new Date(Date.UTC(p.y, p.mo - 1, p.d, p.h, p.mi, p.s))
+  return (
+    date.getUTCFullYear() === p.y &&
+    date.getUTCMonth() === p.mo - 1 &&
+    date.getUTCDate() === p.d &&
+    date.getUTCHours() === p.h &&
+    date.getUTCMinutes() === p.mi &&
+    date.getUTCSeconds() === p.s
+  )
+}
+
+/**
+ * Normalizes a time string to 24h format (MM/DD/YYYY HH:MM:SS).
+ * If already 24h, returns as-is. If 12h AM/PM, converts.
+ */
+function normalizeTo24h(timeUtc: string): string {
+  const p = parseDateTime(timeUtc)
+  if (!p) return timeUtc.trim()
+  const mo = String(p.mo).padStart(2, '0')
+  const d = String(p.d).padStart(2, '0')
+  const h = String(p.h).padStart(2, '0')
+  const mi = String(p.mi).padStart(2, '0')
+  const s = String(p.s).padStart(2, '0')
+  return `${mo}/${d}/${p.y} ${h}:${mi}:${s}`
+}
+
+/**
+ * Normalizes manually entered instrument names before saving a row.
+ * @param instrument - Raw instrument name from the form
+ * @returns Canonical instrument name for storage
+ */
+function normalizeInstrumentInput(instrument: string): string {
+  const trimmed = instrument.trim()
+  if (trimmed.toUpperCase() === 'USD_STABLE_COIN') return 'USD_Stable_Coin'
+  return trimmed.toUpperCase()
+}
+
+interface AddRowFormState {
+  timeUtc: string
+  journalType: JournalType
+  exchangeName: string
+  instrument: string
+  side: TradeSide
+  quantity: string
+  cost: string
+  takerSide: string
+}
+
+/**
+ * Creates the initial form state for either a new row or an existing row edit.
+ * @param editRow - Existing row being edited, or null for a new manual row
+ * @returns Initial form field values
+ */
+function createInitialFormState(editRow?: CryptoComRow | null): AddRowFormState {
+  if (!editRow) {
+    return {
+      timeUtc: nowUtcString(),
+      journalType: JournalType.TRADING,
+      exchangeName: '',
+      instrument: '',
+      side: null,
+      quantity: '',
+      cost: '',
+      takerSide: '',
+    }
+  }
+
+  return {
+    timeUtc: editRow.timeUtc,
+    journalType: editRow.journalType,
+    exchangeName: editRow.exchangeName || '',
+    instrument: editRow.instrument,
+    side: editRow.side,
+    quantity: editRow.transactionQuantity.toString(),
+    cost: editRow.transactionCost.toString(),
+    takerSide: editRow.takerSide,
+  }
+}
+
+/**
+ * Opens the manual transaction dialog when requested.
+ * @param props - Dialog visibility, close handler, and optional row being edited
+ * @returns Manual transaction dialog element, or null when closed
+ */
+export function AddRowDialog({ open, onClose, editRow }: AddRowDialogProps) {
+  if (!open) return null
+
+  return (
+    <AddRowDialogContent
+      key={editRow ? `edit-${editRow.order}` : 'add'}
+      open={open}
+      onClose={onClose}
+      editRow={editRow}
+    />
+  )
+}
+
+/**
+ * Renders the manual transaction form with state initialized on mount.
+ * @param props - Dialog visibility, close handler, and optional row being edited
+ * @returns Manual transaction dialog form
+ */
+function AddRowDialogContent({ open, onClose, editRow }: AddRowDialogProps) {
+  const addManualRow = useAppStore(s => s.addManualRow)
+  const updateRow = useAppStore(s => s.updateRow)
+  const rawTransactions = useAppStore(s => s.rawTransactions)
+  const initialState = createInitialFormState(editRow)
+
+  const [timeUtc, setTimeUtc] = useState(initialState.timeUtc)
+  const [journalType, setJournalType] = useState<JournalType>(initialState.journalType)
+  const [exchangeName, setExchangeName] = useState(initialState.exchangeName)
+  const [instrument, setInstrument] = useState(initialState.instrument)
+  const [side, setSide] = useState<TradeSide>(initialState.side)
+  const [quantity, setQuantity] = useState(initialState.quantity)
+  const [cost, setCost] = useState(initialState.cost)
+  const [takerSide, setTakerSide] = useState(initialState.takerSide)
+  const [pendingNewExchange, setPendingNewExchange] = useState<string | null>(null)
+  const knownExchanges = useExchangeList()
+
+  const isEdit = !!editRow
+  const dateValid = isValidDate(timeUtc)
+
+  /**
+   * Saves the entered row, optionally accepting a new exchange name.
+   * @param allowNewExchange - Whether to save an unknown exchange without confirmation
+   */
+  function handleSave(allowNewExchange = false) {
+    const normalized = normalizeTo24h(timeUtc)
+    const normalizedExchange = exchangeName.trim()
+
+    if (normalizedExchange && !knownExchanges.includes(normalizedExchange) && !allowNewExchange) {
+      setPendingNewExchange(normalizedExchange)
+      return
+    }
+
+    if (isEdit) {
+      updateRow(editRow!.order, {
+        timeUtc: normalized,
+        eventDate: timeToEventDate(normalized),
+        journalType,
+        exchangeName: normalizedExchange || undefined,
+        instrument: normalizeInstrumentInput(instrument),
+        takerSide: takerSide.trim(),
+        side,
+        transactionQuantity: parseFloat(quantity) || 0,
+        transactionCost: parseFloat(cost) || 0,
+      })
+    } else {
+      const maxOrder = rawTransactions.reduce((max, r) => Math.max(max, r.order), 0)
+      const row: CryptoComRow = {
+        order: maxOrder + 1,
+        journalId: '',
+        timeUtc: normalized,
+        eventDate: timeToEventDate(normalized),
+        journalType,
+        exchangeName: normalizedExchange || undefined,
+        instrument: normalizeInstrumentInput(instrument),
+        takerSide: takerSide.trim(),
+        side,
+        transactionQuantity: parseFloat(quantity) || 0,
+        transactionCost: parseFloat(cost) || 0,
+        usdBalance: 0,
+        realizedPnl: 0,
+        orderId: '',
+        tradeId: '',
+        tradeMatchId: '',
+        clientOrderId: '',
+      }
+      addManualRow(row)
+    }
+    setPendingNewExchange(null)
+    onClose()
+  }
+
+  return (
+    <Dialog open={open} onClose={onClose} maxWidth="max-w-md">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-sm font-semibold text-text-primary">{isEdit ? 'Edit Row' : 'Add Row'}</h3>
+          <button onClick={onClose} className="text-text-muted hover:text-text-primary transition-colors">
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="flex flex-col gap-3">
+          <label className="flex flex-col gap-1">
+            <span className="text-xs text-text-secondary">Time (UTC) — MM/DD/YYYY HH:MM:SS or HH:MM:SS AM/PM</span>
+            <input
+              type="text"
+              value={timeUtc}
+              onChange={e => setTimeUtc(e.target.value)}
+              className={`bg-surface-2 border rounded px-2.5 py-1.5 text-xs text-text-primary outline-none ${
+                timeUtc && !dateValid ? 'border-danger focus:border-danger' : 'border-border focus:border-accent/50'
+              }`}
+            />
+            {timeUtc && !dateValid && (
+              <span className="text-[10px] text-danger">Invalid date</span>
+            )}
+          </label>
+
+          <label className="flex flex-col gap-1">
+            <span className="text-xs text-text-secondary">Exchange</span>
+            <input
+              type="text"
+              list="exchange-options"
+              value={exchangeName}
+              onChange={e => setExchangeName(e.target.value)}
+              placeholder="Crypto.com, Binance..."
+              className="bg-surface-2 border border-border rounded px-2.5 py-1.5 text-xs text-text-primary outline-none focus:border-accent/50 placeholder:text-text-muted"
+            />
+            <datalist id="exchange-options">
+              {knownExchanges.map(exchange => (
+                <option key={exchange} value={exchange} />
+              ))}
+            </datalist>
+          </label>
+
+          <div className="grid grid-cols-2 gap-3">
+            <label className="flex flex-col gap-1">
+              <span className="text-xs text-text-secondary">Journal Type</span>
+              <select
+                value={journalType}
+                onChange={e => setJournalType(e.target.value as JournalType)}
+                className="bg-surface-2 border border-border rounded px-2.5 py-1.5 text-xs text-text-primary outline-none focus:border-accent/50"
+              >
+                {journalTypes.map(t => (
+                  <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>
+                ))}
+              </select>
+            </label>
+
+            <label className="flex flex-col gap-1">
+              <span className="text-xs text-text-secondary">Instrument</span>
+              <input
+                type="text"
+                value={instrument}
+                onChange={e => setInstrument(e.target.value)}
+                placeholder="BTC, SOL, USD..."
+                className="bg-surface-2 border border-border rounded px-2.5 py-1.5 text-xs text-text-primary outline-none focus:border-accent/50 placeholder:text-text-muted"
+              />
+            </label>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <label className="flex flex-col gap-1">
+              <span className="text-xs text-text-secondary">Side</span>
+              <select
+                value={side || ''}
+                onChange={e => setSide(e.target.value as TradeSide || null)}
+                className="bg-surface-2 border border-border rounded px-2.5 py-1.5 text-xs text-text-primary outline-none focus:border-accent/50"
+              >
+                <option value="">None</option>
+                <option value="BUY">BUY</option>
+                <option value="SELL">SELL</option>
+              </select>
+            </label>
+
+            <label className="flex flex-col gap-1">
+              <span className="text-xs text-text-secondary">Taker Side</span>
+              <input
+                type="text"
+                value={takerSide}
+                onChange={e => setTakerSide(e.target.value)}
+                placeholder="TAKER, MAKER..."
+                className="bg-surface-2 border border-border rounded px-2.5 py-1.5 text-xs text-text-primary outline-none focus:border-accent/50 placeholder:text-text-muted"
+              />
+            </label>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <label className="flex flex-col gap-1">
+              <span className="text-xs text-text-secondary">Transaction Quantity</span>
+              <input
+                type="text"
+                value={quantity}
+                onChange={e => setQuantity(e.target.value)}
+                placeholder="0.00"
+                className="bg-surface-2 border border-border rounded px-2.5 py-1.5 text-xs text-text-primary outline-none focus:border-accent/50 placeholder:text-text-muted"
+              />
+            </label>
+
+            <label className="flex flex-col gap-1">
+              <span className="text-xs text-text-secondary">Transaction Cost</span>
+              <input
+                type="text"
+                value={cost}
+                onChange={e => setCost(e.target.value)}
+                placeholder="0.00"
+                className="bg-surface-2 border border-border rounded px-2.5 py-1.5 text-xs text-text-primary outline-none focus:border-accent/50 placeholder:text-text-muted"
+              />
+            </label>
+          </div>
+        </div>
+
+        <div className="flex gap-2 justify-end mt-5">
+          <button
+            onClick={onClose}
+            className="px-3 py-1.5 text-xs text-text-muted hover:text-text-primary transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => handleSave()}
+            disabled={!instrument.trim() || !dateValid}
+            className="px-3 py-1.5 text-xs bg-accent/20 border border-accent/40 rounded text-accent hover:bg-accent/30 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {isEdit ? 'Save' : 'Add'}
+          </button>
+        </div>
+
+      {pendingNewExchange && (
+        <Dialog open={!!pendingNewExchange} onClose={() => setPendingNewExchange(null)} title="Create Exchange" zIndex="z-[60]">
+          <p className="text-xs text-text-secondary mb-4">
+            Create new exchange "{pendingNewExchange}"?
+          </p>
+          <div className="flex gap-2 justify-end">
+            <button
+              onClick={() => setPendingNewExchange(null)}
+              className="px-3 py-1.5 text-xs text-text-muted hover:text-text-primary transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={() => handleSave(true)}
+              className="px-3 py-1.5 text-xs bg-accent/20 border border-accent/40 rounded text-accent hover:bg-accent/30 transition-colors"
+            >
+              Create
+            </button>
+          </div>
+        </Dialog>
+      )}
+    </Dialog>
+  )
+}

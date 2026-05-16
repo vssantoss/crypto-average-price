@@ -1,0 +1,175 @@
+# Crypto Average Price Calculator - Implementation Plan
+
+## Context
+Victor tracks crypto cost basis in BRL for Brazilian taxes using an Excel spreadsheet. He manually copies data from Crypto.com transaction reports, looks up PTAX exchange rates, and calculates average prices and profit/loss. This webapp automates that entire workflow as a pure frontend SPA.
+
+## Tech Stack
+- **React 19 + Vite + TypeScript** (SPA, no backend)
+- **@tanstack/react-table v8** - headless datatable with sorting, filtering, column visibility
+- **PapaParse** - CSV parsing (handles quoted commas in Crypto.com CSV)
+- **Zustand** - lightweight state management
+- **Tailwind CSS v4** - dark theme styling
+- **lucide-react** - icons
+- **pnpm** (per AGENTS.md)
+
+## File Structure
+```
+crypto-average-price/
+  src/
+    main.tsx
+    App.tsx
+    index.css
+    types/
+      transaction.ts          # CryptoComRow, ProcessedRow, JournalType enum
+      ptax.ts                 # PtaxEntry, PtaxMap
+      app.ts                  # AppState, CoinSummary, UserOverride types
+    parsers/
+      cryptoCom.ts            # Parse Crypto.com CSV -> CryptoComRow[]
+      ptax.ts                 # Parse PTAX CSV(s) -> Map<date, sellRate>
+      outputCsv.ts            # Parse previously exported CSV for re-import
+    engine/
+      tradeMatching.ts        # Index by Trade Match ID, find paired rows
+      runningBalance.ts       # Cumulative balance per instrument
+      ptaxLookup.ts           # Date matching with weekend/holiday fallback
+      averagePrice.ts         # BRL invested tracking, avg price, seed overrides
+      profitLoss.ts           # P/L for sell/withdrawal events
+      usdMerge.ts             # Instrument normalization when toggle ON
+      computeAllColumns.ts    # Orchestrator: raw rows + PTAX + overrides -> ProcessedRow[]
+    store/
+      useAppStore.ts          # Zustand store: transactions, PTAX, overrides, settings
+      selectors.ts            # Memoized derived state (processed rows, summaries)
+    components/
+      layout/
+        Header.tsx            # App title
+        ImportPanel.tsx       # File import buttons (3 types)
+        SummaryPanel.tsx      # Balance, avg price, total invested per coin
+      controls/
+        CoinSelector.tsx      # Dropdown filter by instrument
+        UsdMergeToggle.tsx    # "Treat all USD stablecoins as one"
+        ColumnVisibility.tsx  # Show/hide columns
+        ExportButton.tsx      # Export to CSV
+      table/
+        DataTable.tsx         # Main TanStack Table wrapper
+        TableHeader.tsx       # Column headers with sort indicators
+        TableBody.tsx         # Rows with conditional highlighting
+        EditableCell.tsx      # Click-to-edit cell (Info, BRL cost, avg price seed)
+        ColumnFilter.tsx      # Per-column text filter
+        PtaxWarningIcon.tsx   # Warning for missing PTAX dates
+      dialogs/
+        RecoveryDialog.tsx    # "Recover previous session?" on load
+        PtaxWarningsDialog.tsx
+    utils/
+      date.ts                 # Date parsing/formatting (2 formats only, no library needed)
+      number.ts               # BRL/USD formatting, comma-decimal parsing
+      csv.ts                  # PapaParse wrappers
+      localStorage.ts         # Save/load session with schema version
+```
+
+## Average Price Calculation (Core Logic)
+
+**Formula:** `avg_price = BRL_invested / coin_balance`
+
+Per transaction type for a given instrument:
+
+| Journal Type | BRL Invested | Balance | Avg Price |
+|---|---|---|---|
+| OFFCHAIN_DEPOSIT / ONCHAIN_DEPOSIT | += user-provided BRL cost | += qty | Recalculates |
+| TRADING BUY (receiving coin) | += abs(paired_USD_cost) x PTAX | += qty | Recalculates |
+| SOFT_STAKE_REWARD | unchanged (zero cost) | += qty | Drops |
+| TRADING SELL / WITHDRAWAL | -= current_avg x abs(qty) | -= abs(qty) | Unchanged |
+| TRADE_FEE / CRYPTO_DUSTING | -= current_avg x abs(qty) | -= abs(qty) | Unchanged |
+
+**Seed mechanism:** User can enter avg price at any row. Before seed: avg = blank. At seed row: `BRL_invested = seed_avg x balance_at_row`. Forward: calculated. Second seed resets from that point.
+
+**Profit/Loss (SELL/WITHDRAWAL only):**
+- USD coins: `P/L = (PTAX_rate - avg_price) x abs(qty)`
+- Non-USD coins: `effective_BRL_rate = (abs(paired_USD) x PTAX) / abs(qty)`, then `P/L = (effective_BRL_rate - avg_price) x abs(qty)`
+
+## PTAX Handling
+- Use **venda (sell) rate** - column index 5 (0-based) in semicolon-delimited file
+- Comma decimal separator (e.g., `5,7648` -> 5.7648)
+- Weekend/holiday fallback: walk backwards to most recent business day
+- Support **multiple PTAX file imports** (merge by date)
+- Show warnings for dates with no PTAX data
+
+## Editable Cells
+- **Info column**: all rows, free text
+- **BRL cost**: deposit rows only (user enters actual BRL paid, not PTAX)
+- **Preço Médio Compra**: any row (seeds the avg price calculation)
+- **Initial Balance**: first row per instrument (for pre-existing holdings)
+
+## USD Merge Toggle
+When ON: merge USDT, USDC, USD, USD_Stable_Coin into single "USD" instrument. Combined running balance and avg price.
+
+## Session Persistence
+- Auto-save to localStorage on every change (imports, edits, settings)
+- On load: detect saved session, show recovery dialog
+- Save: raw transactions, PTAX data, all user overrides, settings, column visibility
+
+## Implementation Phases
+
+### Phase 1: Scaffolding + CSV Parsing
+- Vite + React + TS project setup, Tailwind dark theme
+- Type definitions
+- Crypto.com CSV parser (handle trailing commas, NULL_VAL, negative numbers)
+- PTAX CSV parser (semicolon-delimited, comma decimals, merge multiple files)
+- Date/number utility functions
+- **Verify:** console.log parsed data from both sample CSVs
+
+### Phase 2: Calculation Engine
+- Trade matching (Trade Match ID index)
+- Running balance per instrument
+- PTAX date lookup with fallback
+- Average price state machine with seed support
+- Profit/loss calculation
+- USD merge normalization
+- computeAllColumns orchestrator
+- **Verify:** compare engine output against output-format.csv rows that have BRL values (rows 39, 49-50, 82, 92-93, 96-98, 102, 110-111)
+
+### Phase 3: Store + DataTable
+- Zustand store with all state and actions
+- Memoized selectors for processed rows
+- TanStack Table with all 16 columns
+- Tri-state sorting (asc/desc/none)
+- Per-column text filters
+- Dark theme table styling
+- **Verify:** import CSVs in browser, see full table, sorting and filtering work
+
+### Phase 4: Editable Cells + Interactivity
+- EditableCell component (click to edit, Enter/Escape)
+- Wire editable cells for Info, BRL cost, avg price seed, initial balance
+- Visual indicators (pencil icon, colored background for seeded values)
+- Recompute on edit
+- PTAX warning icons
+- **Verify:** edit cells, confirm downstream recalculation matches spreadsheet
+
+### Phase 5: Import/Export + Controls
+- Import panel (3 file types)
+- Export to CSV
+- Import previously exported CSV
+- Coin selector dropdown
+- USD merge toggle
+- Column visibility checkboxes
+- **Verify:** full round-trip: import -> edit -> export -> re-import -> data matches
+
+### Phase 6: Summary, Persistence, Polish
+- Summary panel (balance, avg price, total invested per coin)
+- localStorage persistence + recovery dialog
+- PTAX warnings dialog
+- Row highlighting (green=buy/deposit, red=sell/withdrawal, neutral=staking)
+- Responsive layout (horizontal scroll for table)
+- Final styling pass
+
+## Critical Reference Files
+- `input-format-crypto.com-transactions-report.csv` - defines input columns, journal types, Trade Match ID pairing
+- `output-format.csv` - ground truth for all calculated columns (verification target)
+- `brazil-ptax-exchange-2025.csv` - PTAX format reference (semicolon-delimited, comma decimals)
+- `AGENTS.md` - coding standards (pnpm, function comments, no CDNs, focused files)
+
+## Key Implementation Details
+1. Crypto.com CSV header has trailing commas creating empty columns - parser must handle this
+2. Running Balance in output has dollar formatting with commas (`" $1,064.61 "`) - re-import parser must strip
+3. One trade order can produce multiple Trade Match IDs (multiple fills) - index must be 1:many
+4. Transaction Quantity is already negative for sells/fees - use Math.abs() for BRL deductions
+5. PTAX file dates are `ddmmyyyy` format, Crypto.com dates are `MM/DD/YYYY` - normalize to ISO
+6. BRL columns show `R$ -` when no avg price seed exists - display as blank/dash, not zero
