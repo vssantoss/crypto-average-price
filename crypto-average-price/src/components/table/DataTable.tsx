@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo, useEffect, type CSSProperties } from 'react'
 import {
   useReactTable,
   getCoreRowModel,
@@ -9,11 +9,14 @@ import {
   type SortingState,
   type ColumnFiltersState,
   type VisibilityState,
+  type ColumnPinningState,
   type FilterFn,
+  type Column,
 } from '@tanstack/react-table'
 import type { ProcessedRow } from '../../types/transaction'
 import { JournalType } from '../../types/transaction'
 import { useAppStore } from '../../store/useAppStore'
+import { TABLE_ACTIONS_COLUMN_ID } from '../../types/app'
 import { createColumns } from './columns'
 import { ColumnFilter } from './ColumnFilter'
 import { EditableCell } from './EditableCell'
@@ -28,6 +31,8 @@ const caseInsensitiveFilter: FilterFn<ProcessedRow> = (row, columnId, filterValu
 }
 import { formatNumber } from '../../utils/number'
 
+const ACTION_COLUMN_WIDTH = 40
+
 /**
  * Props for the DataTable component.
  */
@@ -38,6 +43,10 @@ interface DataTableProps {
 interface TableColumnMeta {
   editable?: string
   numeric?: boolean
+}
+
+interface StickyColumnRenderState {
+  style: CSSProperties
 }
 
 /**
@@ -92,6 +101,99 @@ function getCellContentClass(numeric: boolean): string {
 }
 
 /**
+ * Gets an opaque background color for sticky body cells.
+ * @param row - The processed row rendered by the sticky cell
+ * @returns CSS background color preserving the row's transaction tint
+ */
+function getStickyBodyBackground(row: ProcessedRow): string {
+  if (
+    row.side === 'BUY' ||
+    row.journalType === JournalType.OFFCHAIN_DEPOSIT ||
+    row.journalType === JournalType.ONCHAIN_DEPOSIT
+  ) {
+    return 'color-mix(in srgb, var(--color-surface-0) 82%, var(--color-success))'
+  }
+  if (
+    row.side === 'SELL' ||
+    row.journalType === JournalType.OFFCHAIN_WITHDRAWAL ||
+    row.journalType === JournalType.ONCHAIN_WITHDRAWAL
+  ) {
+    return 'color-mix(in srgb, var(--color-surface-0) 82%, var(--color-danger))'
+  }
+  return 'var(--color-surface-0)'
+}
+
+/**
+ * Builds sticky positioning props for a pinned table column.
+ * @param column - TanStack table column
+ * @param backgroundColor - Opaque background color for sticky overlap
+ * @param zIndex - Layer order for the sticky cell
+ * @param leftOffset - Extra left offset reserved before TanStack columns
+ * @returns Extra class and style props for the rendered cell
+ */
+function getStickyColumnRenderState(
+  column: Column<ProcessedRow, unknown>,
+  backgroundColor: string,
+  zIndex: number,
+  leftOffset = 0,
+): StickyColumnRenderState {
+  const pinned = column.getIsPinned()
+  if (pinned !== 'left') return { style: {} }
+
+  return {
+    style: {
+      position: 'sticky',
+      left: column.getStart('left') + leftOffset,
+      zIndex,
+      backgroundColor,
+    },
+  }
+}
+
+/**
+ * Checks whether the manual row action gutter should stick while scrolling.
+ * @param stickyColumns - Active sticky column ids from the saved or preview layout
+ * @returns True when the edit/delete gutter should be sticky
+ */
+function isActionColumnSticky(stickyColumns: string[]): boolean {
+  return stickyColumns.includes(TABLE_ACTIONS_COLUMN_ID)
+}
+
+/**
+ * Builds sticky positioning props for the manual edit/delete action gutter.
+ * @param sticky - Whether the action gutter should be sticky
+ * @param backgroundColor - Opaque background color for sticky overlap
+ * @param zIndex - Layer order for the sticky cell
+ * @returns Extra class and style props for the rendered action cell
+ */
+function getActionColumnRenderState(
+  sticky: boolean,
+  backgroundColor: string,
+  zIndex: number,
+): StickyColumnRenderState {
+  if (!sticky) return { style: {} }
+
+  return {
+    style: {
+      position: 'sticky',
+      left: 0,
+      zIndex,
+      backgroundColor,
+    },
+  }
+}
+
+/**
+ * Combines existing and sticky table cell styles.
+ * @param baseStyle - Existing table cell dimensions
+ * @param stickyStyle - Sticky column style overrides
+ * @returns A merged style object for the rendered cell
+ */
+function mergeCellStyle(baseStyle: CSSProperties, stickyStyle: CSSProperties): CSSProperties {
+  return { ...baseStyle, ...stickyStyle }
+}
+
+/**
  * Main datatable component.
  * Renders a TanStack Table with sorting, filtering, column visibility,
  * and inline-editable cells for Info, BRL cost, and avg price seed.
@@ -103,8 +205,20 @@ export function DataTable({ data }: DataTableProps) {
   const [columnFilters, setColumnFiltersRaw] = useState<ColumnFiltersState>([])
   const [editRow, setEditRow] = useState<CryptoComRow | null>(null)
   const [deleteOrder, setDeleteOrder] = useState<number | null>(null)
-  const columnVisibility = useAppStore(s => s.settings.columnVisibility) as VisibilityState
-  const setColumnVisibility = useAppStore(s => s.setColumnVisibility)
+  const tableLayoutPreview = useAppStore(s => s.tableLayoutPreview)
+  const savedColumnVisibility = useAppStore(s => s.settings.columnVisibility)
+  const savedStickyColumns = useAppStore(s => s.settings.stickyColumns)
+  const columnVisibility = (tableLayoutPreview?.columnVisibility ?? savedColumnVisibility) as VisibilityState
+  const stickyColumns = useMemo(
+    () => tableLayoutPreview?.stickyColumns ?? savedStickyColumns ?? [],
+    [savedStickyColumns, tableLayoutPreview?.stickyColumns],
+  )
+  const actionColumnSticky = isActionColumnSticky(stickyColumns)
+  const dataStickyColumns = useMemo(
+    () => stickyColumns.filter(column => column !== TABLE_ACTIONS_COLUMN_ID),
+    [stickyColumns],
+  )
+  const stickyDataLeftOffset = actionColumnSticky ? ACTION_COLUMN_WIDTH : 0
   const setActiveTableFilters = useAppStore(s => s.setActiveTableFilters)
   const setInfoEdit = useAppStore(s => s.setInfoEdit)
   const setAvgPriceSeed = useAppStore(s => s.setAvgPriceSeed)
@@ -116,6 +230,10 @@ export function DataTable({ data }: DataTableProps) {
   const roundBalance = useAppStore(s => s.settings.roundBalance)
   const cols = useMemo(() => createColumns(timezoneOffset, roundBalance), [timezoneOffset, roundBalance])
   const rawByOrder = useMemo(() => new Map(rawTransactions.map(row => [row.order, row])), [rawTransactions])
+  const columnPinning = useMemo<ColumnPinningState>(() => ({
+    left: dataStickyColumns,
+    right: [],
+  }), [dataStickyColumns])
 
   const headerMap = useMemo(() => {
     const map: Record<string, string> = {}
@@ -153,15 +271,10 @@ export function DataTable({ data }: DataTableProps) {
       sorting,
       columnFilters,
       columnVisibility,
+      columnPinning,
     },
     onSortingChange: setSorting,
     onColumnFiltersChange: setColumnFilters,
-    onColumnVisibilityChange: updater => {
-      const newState = typeof updater === 'function' ? updater(columnVisibility) : updater
-      for (const [key, value] of Object.entries(newState)) {
-        setColumnVisibility(key, value as boolean)
-      }
-    },
     globalFilterFn: caseInsensitiveFilter,
     filterFns: { caseInsensitive: caseInsensitiveFilter },
     defaultColumn: { filterFn: caseInsensitiveFilter },
@@ -170,6 +283,11 @@ export function DataTable({ data }: DataTableProps) {
     getFilteredRowModel: getFilteredRowModel(),
     getFacetedUniqueValues: getFacetedUniqueValues(),
   })
+  const actionHeaderSticky = getActionColumnRenderState(
+    actionColumnSticky,
+    'var(--color-surface-2)',
+    31,
+  )
 
   return (
     <div className="h-full overflow-auto">
@@ -198,19 +316,23 @@ export function DataTable({ data }: DataTableProps) {
           </div>
         </Dialog>
       )}
-      <table className="border-collapse font-mono text-xs" style={{ minWidth: '100%' }}>
+      <table className="border-separate border-spacing-0 font-mono text-xs" style={{ minWidth: '100%' }}>
         <thead className="bg-surface-2 sticky top-0 z-10">
           {table.getHeaderGroups().map(headerGroup => (
             <tr key={headerGroup.id}>
-              <th className="w-[40px] min-w-[40px] px-0 py-2 border-b border-border" />
+              <th
+                className="w-[40px] min-w-[40px] px-0 py-2 border-b border-border"
+                style={actionHeaderSticky.style}
+              />
               {headerGroup.headers.map(header => {
                 const meta = header.column.columnDef.meta as TableColumnMeta | undefined
                 const numeric = isNumericColumn(meta)
+                const sticky = getStickyColumnRenderState(header.column, 'var(--color-surface-2)', 30, stickyDataLeftOffset)
                 return (
                   <th
                     key={header.id}
                     className={`${numeric ? 'text-right' : 'text-left'} text-text-secondary font-medium px-3 py-2 border-b border-border whitespace-nowrap`}
-                    style={{ width: header.getSize(), minWidth: header.getSize() }}
+                    style={mergeCellStyle({ width: header.getSize(), minWidth: header.getSize() }, sticky.style)}
                   >
                     {header.isPlaceholder ? null : (
                       <div className={`flex flex-col gap-1 ${numeric ? 'items-end' : ''}`}>
@@ -240,12 +362,20 @@ export function DataTable({ data }: DataTableProps) {
         <tbody>
           {table.getRowModel().rows.map(row => {
             const original = row.original
+            const actionSticky = getActionColumnRenderState(
+              actionColumnSticky,
+              getStickyBodyBackground(original),
+              21,
+            )
             return (
               <tr
                 key={row.id}
                 className={`${getRowClass(original)} hover:bg-surface-3/50 transition-colors group/row`}
               >
-                <td className="w-[40px] min-w-[40px] px-0 py-1 border-b border-border/50 whitespace-nowrap">
+                <td
+                  className="w-[40px] min-w-[40px] px-0 py-1 border-b border-border/50 whitespace-nowrap"
+                  style={actionSticky.style}
+                >
                   <div className="flex w-full items-center justify-center gap-1 opacity-0 group-hover/row:opacity-100">
                     <button
                       onClick={() => {
@@ -269,11 +399,21 @@ export function DataTable({ data }: DataTableProps) {
                 {row.getVisibleCells().map(cell => {
                   const meta = cell.column.columnDef.meta as TableColumnMeta | undefined
                   const numeric = isNumericColumn(meta)
+                  const sticky = getStickyColumnRenderState(
+                    cell.column,
+                    getStickyBodyBackground(original),
+                    20,
+                    stickyDataLeftOffset,
+                  )
 
                   // Render editable cells
                   if (meta?.editable === 'info') {
                     return (
-                      <td key={cell.id} className="px-2 py-1 border-b border-border/50">
+                      <td
+                        key={cell.id}
+                        className="px-2 py-1 border-b border-border/50"
+                        style={sticky.style}
+                      >
                         <EditableCell
                           value={original.info}
                           onSave={val => setInfoEdit(original.order, val)}
@@ -289,7 +429,11 @@ export function DataTable({ data }: DataTableProps) {
                     const manualValue = raw?.avgPriceSeed !== undefined ? raw.avgPriceSeed.toString() : ''
 
                     return (
-                      <td key={cell.id} className="px-2 py-1 border-b border-border/50 text-right tabular-nums">
+                      <td
+                        key={cell.id}
+                        className="px-2 py-1 border-b border-border/50 text-right tabular-nums"
+                        style={sticky.style}
+                      >
                         <EditableCell
                           value={calculatedValue}
                           editValue={manualValue}
@@ -313,7 +457,11 @@ export function DataTable({ data }: DataTableProps) {
                     const manualValue = raw?.balanceOverride !== undefined ? raw.balanceOverride.toString() : ''
 
                     return (
-                      <td key={cell.id} className={`px-2 py-1 border-b border-border/50 text-right tabular-nums ${original.hasBalanceOverride ? 'bg-accent/10' : ''}`}>
+                      <td
+                        key={cell.id}
+                        className={`px-2 py-1 border-b border-border/50 text-right tabular-nums ${original.hasBalanceOverride ? 'bg-accent/10' : ''}`}
+                        style={sticky.style}
+                      >
                         <EditableCell
                           value={calculatedValue}
                           editValue={manualValue}
@@ -337,7 +485,11 @@ export function DataTable({ data }: DataTableProps) {
                     const manualValue = raw?.userBrlCost !== undefined ? raw.userBrlCost.toString() : ''
 
                     return (
-                      <td key={cell.id} className="px-2 py-1 border-b border-border/50 text-right tabular-nums">
+                      <td
+                        key={cell.id}
+                        className="px-2 py-1 border-b border-border/50 text-right tabular-nums"
+                        style={sticky.style}
+                      >
                         <EditableCell
                           value={calculatedValue}
                           editValue={manualValue}
@@ -358,7 +510,11 @@ export function DataTable({ data }: DataTableProps) {
                   if (cell.column.id === 'totalLucroPrejuizo') {
                     const val = original.totalLucroPrejuizo
                     return (
-                      <td key={cell.id} className={getBodyCellClass(true)}>
+                      <td
+                        key={cell.id}
+                        className={getBodyCellClass(true)}
+                        style={sticky.style}
+                      >
                         {val !== null && (
                           <span className={`inline-block w-full ${val >= 0 ? 'text-success' : 'text-danger'}`}>
                             {flexRender(cell.column.columnDef.cell, cell.getContext())}
@@ -369,7 +525,11 @@ export function DataTable({ data }: DataTableProps) {
                   }
 
                   return (
-                    <td key={cell.id} className={getBodyCellClass(numeric)}>
+                    <td
+                      key={cell.id}
+                      className={getBodyCellClass(numeric)}
+                      style={sticky.style}
+                    >
                       <div className={getCellContentClass(numeric)}>
                         {flexRender(cell.column.columnDef.cell, cell.getContext())}
                         {cell.column.id === 'cambioBC' && original.hasPtaxWarning && (

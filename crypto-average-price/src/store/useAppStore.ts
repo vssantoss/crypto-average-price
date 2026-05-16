@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import type { CryptoComRow } from '../types/transaction'
 import type { PtaxMap } from '../types/ptax'
-import type { AppSettings } from '../types/app'
+import type { AppSettings, TableLayoutSettings } from '../types/app'
 import { parseCryptoComCsv } from '../parsers/cryptoCom'
 import { parsePtaxCsv, mergePtaxMaps } from '../parsers/ptax'
 import { parseExportedCsv } from '../parsers/outputCsv'
@@ -43,6 +43,7 @@ interface AppState {
   rawTransactions: CryptoComRow[]
   ptaxMap: PtaxMap
   settings: AppSettings
+  tableLayoutPreview: TableLayoutSettings | null
   activeTableFilters: ActiveTableFilter[]
   isLoading: boolean
   error: string | null
@@ -63,6 +64,9 @@ interface AppState {
   setSelectedInstrument: (instrument: string | null) => void
   setTimezoneOffset: (offset: number) => void
   setColumnVisibility: (column: string, visible: boolean) => void
+  setTableLayoutPreview: (layout: TableLayoutSettings | null) => void
+  commitColumnLayout: (layout: TableLayoutSettings) => void
+  resetColumnLayout: () => void
   setActiveTableFilters: (filters: ActiveTableFilter[]) => void
   restoreSession: (state: {
     rawTransactions: CryptoComRow[]
@@ -73,18 +77,39 @@ interface AppState {
 }
 
 /**
+ * Default datatable column layout.
+ */
+export const defaultColumnLayout: TableLayoutSettings = {
+  columnVisibility: {
+    exchangeName: false,
+    sourceFileName: false,
+  },
+  stickyColumns: [],
+}
+
+/**
  * Default settings.
  */
 const defaultSettings: AppSettings = {
   usdMergeEnabled: true,
   selectedInstrument: null,
-  columnVisibility: {
-    exchangeName: false,
-    sourceFileName: false,
-  },
+  ...defaultColumnLayout,
   timezoneOffset: 0,
   roundBalance: false,
   panelExpanded: false,
+}
+
+/**
+ * Removes sticky columns that are currently hidden by the visibility settings.
+ * @param stickyColumns - Column ids requested as sticky
+ * @param columnVisibility - Visibility map where false means hidden
+ * @returns Sticky column ids that are still visible
+ */
+function getVisibleStickyColumns(
+  stickyColumns: string[],
+  columnVisibility: Record<string, boolean>,
+): string[] {
+  return stickyColumns.filter(column => columnVisibility[column] !== false)
 }
 
 /**
@@ -175,6 +200,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
   rawTransactions: [],
   ptaxMap: new Map(),
   settings: { ...defaultSettings },
+  tableLayoutPreview: null,
   activeTableFilters: [],
   isLoading: false,
   error: null,
@@ -375,7 +401,39 @@ export const useAppStore = create<AppState>()((set, get) => ({
       settings: {
         ...state.settings,
         columnVisibility: { ...state.settings.columnVisibility, [column]: visible },
+        stickyColumns: visible
+          ? state.settings.stickyColumns ?? []
+          : (state.settings.stickyColumns ?? []).filter(stickyColumn => stickyColumn !== column),
       },
+    }))
+    persist(get())
+  },
+
+  setTableLayoutPreview(layout: TableLayoutSettings | null) {
+    set({ tableLayoutPreview: layout })
+  },
+
+  commitColumnLayout(layout: TableLayoutSettings) {
+    const stickyColumns = getVisibleStickyColumns(layout.stickyColumns, layout.columnVisibility)
+    set(state => ({
+      settings: {
+        ...state.settings,
+        columnVisibility: { ...layout.columnVisibility },
+        stickyColumns,
+      },
+      tableLayoutPreview: null,
+    }))
+    persist(get())
+  },
+
+  resetColumnLayout() {
+    set(state => ({
+      settings: {
+        ...state.settings,
+        columnVisibility: { ...defaultSettings.columnVisibility },
+        stickyColumns: [],
+      },
+      tableLayoutPreview: null,
     }))
     persist(get())
   },
@@ -388,6 +446,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
     set({
       rawTransactions: restored.rawTransactions,
       ptaxMap: restored.ptaxMap,
+      tableLayoutPreview: null,
       settings: {
         ...defaultSettings,
         ...restored.settings,
@@ -395,6 +454,13 @@ export const useAppStore = create<AppState>()((set, get) => ({
           ...defaultSettings.columnVisibility,
           ...restored.settings.columnVisibility,
         },
+        stickyColumns: getVisibleStickyColumns(
+          restored.settings.stickyColumns ?? defaultSettings.stickyColumns,
+          {
+            ...defaultSettings.columnVisibility,
+            ...restored.settings.columnVisibility,
+          },
+        ),
       },
     })
   },
@@ -404,6 +470,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
       rawTransactions: [],
       ptaxMap: new Map(),
       settings: { ...defaultSettings },
+      tableLayoutPreview: null,
       activeTableFilters: [],
       error: null,
     })

@@ -10,12 +10,24 @@ export interface CoinSummary {
 }
 
 /**
+ * Synthetic datatable column id for the edit/delete action gutter.
+ */
+export const TABLE_ACTIONS_COLUMN_ID = '__rowActions'
+
+/**
+ * Column layout options used by the datatable.
+ */
+export interface TableLayoutSettings {
+  columnVisibility: Record<string, boolean>
+  stickyColumns: string[]
+}
+
+/**
  * Application settings that persist across sessions.
  */
-export interface AppSettings {
+export interface AppSettings extends TableLayoutSettings {
   usdMergeEnabled: boolean
   selectedInstrument: string | null
-  columnVisibility: Record<string, boolean>
   timezoneOffset: number
   roundBalance: boolean
   panelExpanded: boolean
