@@ -333,6 +333,56 @@ export function getFeeRows(group: TradeGroup): CryptoComRow[] {
 }
 
 /**
+ * Gets the original grouped row for a possibly normalized transaction row.
+ * @param row - Transaction row to match by display order
+ * @param group - Linked trade group containing original rows
+ * @returns Original row from the group, or the input row when no match exists
+ */
+function getOriginalGroupedRow(row: CryptoComRow, group: TradeGroup): CryptoComRow {
+  return group.rows.find(groupRow => groupRow.order === row.order) || row
+}
+
+/**
+ * Gets the positive linked fee quantity that belongs to the same instrument as a trading row.
+ * @param row - Trading row to inspect
+ * @param index - Trade link index built from all rows
+ * @returns Positive same-instrument linked fee quantity, or 0 when none applies
+ */
+export function getLinkedTradeFeeQuantity(row: CryptoComRow, index: TradeLinkIndex): number {
+  const group = findTradeGroup(row, index)
+  if (!group || row.journalType !== JournalType.TRADING) return 0
+
+  const originalRow = getOriginalGroupedRow(row, group)
+  return getFeeRows(group)
+    .filter(fee => fee.instrument === originalRow.instrument)
+    .reduce((sum, fee) => sum + Math.abs(fee.transactionQuantity), 0)
+}
+
+/**
+ * Calculates the transaction quantity after subtracting same-instrument linked trade fees.
+ * @param row - Transaction row to inspect
+ * @param index - Trade link index built from all rows
+ * @returns Raw transaction quantity minus the positive linked trade fee quantity
+ */
+export function getNetTransactionQuantity(row: CryptoComRow, index: TradeLinkIndex): number {
+  return row.transactionQuantity - getLinkedTradeFeeQuantity(row, index)
+}
+
+/**
+ * Checks whether a trade fee row is already represented on a linked trading row.
+ * @param row - Transaction row to inspect
+ * @param index - Trade link index built from all rows
+ * @returns True when this is a linked fee row for a same-instrument trading row
+ */
+export function isFoldedTradeFeeRow(row: CryptoComRow, index: TradeLinkIndex): boolean {
+  const group = findTradeGroup(row, index)
+  if (!group || row.journalType !== JournalType.TRADE_FEE) return false
+
+  const originalRow = getOriginalGroupedRow(row, group)
+  return getTradingRows(group).some(tradingRow => tradingRow.instrument === originalRow.instrument)
+}
+
+/**
  * Finds the linked opposite trading leg for a row.
  * @param row - Transaction row to find a pair for
  * @param index - Trade link index built from all rows

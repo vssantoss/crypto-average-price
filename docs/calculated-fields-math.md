@@ -17,6 +17,8 @@ This software is provided as is for personal recordkeeping and calculation assis
 - `BRL invested` means the total cost basis still assigned to the current holdings after the row.
 - `avg price` means `BRL invested / current balance`.
 - `PTAX` means the imported Banco Central do Brasil USD/BRL sell rate for the row date, or the most recent previous rate found within the lookup window.
+- `Trade Fee` means the positive quantity from linked `TRADE_FEE` rows when the fee uses the same instrument as the trading row.
+- `Net Tx Quantity` means `Tx Quantity - Trade Fee`.
 
 ## Running Balance
 
@@ -74,6 +76,8 @@ Displayed as: `BRL Tx Cost`
 
 This field means "the BRL amount attached to this row." For buys and deposits, it is acquisition cost. For sells and withdrawals, it is sale proceeds.
 
+When a trading row has a linked same-instrument fee, PTAX-based trade math uses `Net Tx Quantity` instead of raw `Tx Quantity`.
+
 ### Manual Value
 
 When a row allows editing and the user enters a BRL amount, that manual amount wins:
@@ -96,14 +100,14 @@ USD-to-USD trades inside the merged `USD (merged)` instrument are ignored becaus
 When a USD-like asset is bought by selling a non-USD crypto, and the app can link both trade legs:
 
 ```text
-BRL Tx Cost = abs(USD-like quantity bought) * PTAX Rate
+BRL Tx Cost = abs(Net Tx Quantity for the USD-like buy row) * PTAX Rate
 ```
 
 Example:
 
 ```text
-Buy 100 USDC with BTC, PTAX = 5.20
-BRL Tx Cost = 100 * 5.20 = R$ 520.00
+Buy 100 USDC with BTC, linked trade fee = 1 USDC, PTAX = 5.20
+BRL Tx Cost = 99 * 5.20 = R$ 514.80
 ```
 
 ### USD-Like Sale Or Withdrawal
@@ -111,13 +115,13 @@ BRL Tx Cost = 100 * 5.20 = R$ 520.00
 For a USD-like `SELL` row or withdrawal:
 
 ```text
-BRL Tx Cost = USD amount sold or withdrawn * PTAX Rate
+BRL Tx Cost = USD amount sold or withdrawn, after same-instrument trade fee, * PTAX Rate
 ```
 
 The USD amount is:
 
 ```text
-abs(Tx Quantity), if Tx Quantity is not zero
+abs(Net Tx Quantity), if Net Tx Quantity is not zero
 otherwise abs(Tx Cost)
 ```
 
@@ -129,7 +133,7 @@ When a non-USD crypto is sold and the app can find the linked USD-like buy row:
 BRL Tx Cost = USD amount received * PTAX Rate
 ```
 
-The USD amount received comes from the linked USD-like row.
+The USD amount received comes from the linked USD-like row's `Net Tx Quantity`.
 
 ### When It Is Blank
 
@@ -168,11 +172,15 @@ For rows that remove holdings, the app removes cost basis at the current average
 
 ```text
 average price before row = BRL invested before row / balance before row
-cost basis removed = average price before row * abs(quantity)
+cost basis removed = average price before row * abs(Net Tx Quantity)
 BRL invested after row = BRL invested before row - cost basis removed
 ```
 
 Plain English: selling or removing part of a coin removes the same proportion of BRL cost basis that those units carried before the row.
+
+Linked same-instrument fee rows are not counted a second time in BRL cost basis after their quantity has already been folded into the trading row's `Net Tx Quantity`.
+
+Matched trade fee rows remain in the table and exported CSV as raw transaction rows, but their calculated fields are blank. This includes PTAX, running balance, BRL balance, BRL transaction cost, average price, profit/loss, trade fee, and net transaction quantity.
 
 ### Soft Stake Reward
 
@@ -255,12 +263,14 @@ Where:
 cost basis sold = BRL Avg Price * abs(quantity sold or withdrawn)
 ```
 
+For linked same-instrument trading fees, `quantity sold or withdrawn` uses `Net Tx Quantity`.
+
 ### Manual Sale Proceeds
 
 If the row has a manually entered `BRL Tx Cost`, that manual value is treated as sale proceeds:
 
 ```text
-BRL Profit/Loss = manual BRL Tx Cost - (BRL Avg Price * abs(quantity))
+BRL Profit/Loss = manual BRL Tx Cost - (BRL Avg Price * abs(Net Tx Quantity))
 ```
 
 ### USD-Like Sale Or Withdrawal
@@ -268,8 +278,8 @@ BRL Profit/Loss = manual BRL Tx Cost - (BRL Avg Price * abs(quantity))
 For USD-like instruments:
 
 ```text
-sale proceeds in BRL = abs(quantity) * PTAX Rate
-BRL Profit/Loss = sale proceeds in BRL - (BRL Avg Price * abs(quantity))
+sale proceeds in BRL = abs(Net Tx Quantity) * PTAX Rate
+BRL Profit/Loss = sale proceeds in BRL - (BRL Avg Price * abs(Net Tx Quantity))
 ```
 
 ### Non-USD Crypto Sold For USD
@@ -277,8 +287,8 @@ BRL Profit/Loss = sale proceeds in BRL - (BRL Avg Price * abs(quantity))
 For non-USD crypto sold into a USD-like asset, the app uses the linked USD-like row:
 
 ```text
-sale proceeds in BRL = linked USD amount received * PTAX Rate
-BRL Profit/Loss = sale proceeds in BRL - (BRL Avg Price * abs(non-USD quantity sold))
+sale proceeds in BRL = abs(linked USD Net Tx Quantity) * PTAX Rate
+BRL Profit/Loss = sale proceeds in BRL - (BRL Avg Price * abs(non-USD Net Tx Quantity sold))
 ```
 
 ### When It Is Blank

@@ -2,8 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import Papa from 'papaparse'
 import type { ProcessedRow } from '../../types/transaction'
 import { useAppStore } from '../../store/useAppStore'
-import { buildExportCsvRow } from '../../parsers/exportSchema'
-import { Dialog } from '../common/Dialog'
+import { buildExportCsvRow, type ExportCsvOptions } from '../../parsers/exportSchema'
+import { Dialog, DialogFooter, dialogCancelClass, dialogPrimaryClass, dialogSecondaryClass } from '../common/Dialog'
 import { usePromiseDialog } from '../../hooks/usePromiseDialog'
 import { Download, Save, X } from 'lucide-react'
 
@@ -39,12 +39,13 @@ interface ExportErrorDialog {
 /**
  * Builds output CSV rows from processed table rows.
  * @param data - Processed rows selected for export
+ * @param options - Export options (e.g. whether to include calculated columns)
  * @returns Plain objects ready for PapaParse CSV serialization
  */
-function buildExportRows(data: ProcessedRow[]) {
+function buildExportRows(data: ProcessedRow[], options?: ExportCsvOptions) {
   const rawTransactions = useAppStore.getState().rawTransactions
   const rawMap = new Map(rawTransactions.map(r => [r.order, r]))
-  return data.map(row => buildExportCsvRow(row, rawMap.get(row.order)))
+  return data.map(row => buildExportCsvRow(row, rawMap.get(row.order), options))
 }
 
 /**
@@ -196,6 +197,7 @@ export function ExportButton({ data, allData }: ExportButtonProps) {
   const [filenameDraft, setFilenameDraft] = useState('')
   const [lastExportFilename, setLastExportFilename] = useState<string | null>(null)
   const [keepUpdated, setKeepUpdated] = useState(false)
+  const [includeCalculated, setIncludeCalculated] = useState(false)
   const [liveMode, setLiveMode] = useState<LiveExportMode | null>(null)
   const [liveHandle, setLiveHandle] = useState<SaveFileHandle | null>(null)
   const [liveStatus, setLiveStatus] = useState('')
@@ -248,7 +250,7 @@ export function ExportButton({ data, allData }: ExportButtonProps) {
       setLiveStatus('Saving...')
 
       try {
-        await writeCsvToHandle(handle, buildExportRows(liveRows))
+        await writeCsvToHandle(handle, buildExportRows(liveRows, { includeCalculated }))
         if (!cancelled) setLiveStatus('Saved')
       } catch (err) {
         if (!cancelled) {
@@ -276,7 +278,7 @@ export function ExportButton({ data, allData }: ExportButtonProps) {
       cancelled = true
       window.clearTimeout(timeout)
     }
-  }, [liveRows, liveHandle, liveMode])
+  }, [liveRows, liveHandle, liveMode, includeCalculated])
 
   /**
    * Builds the default export filename from current filter context.
@@ -316,15 +318,29 @@ export function ExportButton({ data, allData }: ExportButtonProps) {
   }
 
   /**
-   * Confirms live export setup and continues to the export file picker.
-   * @returns Promise that resolves after the next export step opens or completes
+   * Confirms live export setup and continues to file selection when no export choice is needed.
+   * @returns Promise that resolves after the live export flow starts or waits for an export choice
    */
   async function confirmKeepUpdated(): Promise<void> {
     setShowKeepUpdatedInfo(false)
     setKeepUpdated(true)
 
     if (!showModal) {
-      await handleExport(true)
+      try {
+        await exportRows('current', data, getFilename({ includeInstrument: true }), true)
+      } catch (err) {
+        setExportError(buildExportErrorDialog(err, 'live'))
+      }
+      return
+    }
+
+    if (activeFilters.length === 0) {
+      try {
+        setShowModal(false)
+        await exportRows('current', data, getFilename({ includeInstrument: true }), true)
+      } catch (err) {
+        setExportError(buildExportErrorDialog(err, 'live'))
+      }
     }
   }
 
@@ -342,7 +358,7 @@ export function ExportButton({ data, allData }: ExportButtonProps) {
     filename: string,
     forceKeepUpdated = false,
   ): Promise<void> {
-    const rowsToExport = buildExportRows(rows)
+    const rowsToExport = buildExportRows(rows, { includeCalculated })
 
     if (!keepUpdated && !forceKeepUpdated) {
       const savedFilename = await saveCsvFile(rowsToExport, filename, requestFallbackFilename)
@@ -376,21 +392,11 @@ export function ExportButton({ data, allData }: ExportButtonProps) {
   }
 
   /**
-   * Starts the export flow, asking filtered/all only when filters are active.
-   * @param forceKeepUpdated - Whether this export should start live file updates
-   * @returns Promise that resolves after export starts or the choice dialog opens
+   * Opens the export options dialog.
    */
-  async function handleExport(forceKeepUpdated = false): Promise<void> {
-    try {
-      if (data.length === 0) return
-      if (activeFilters.length === 0) {
-        await exportRows('current', data, getFilename({ includeInstrument: true }), forceKeepUpdated)
-        return
-      }
-      setShowModal(true)
-    } catch (err) {
-      setExportError(buildExportErrorDialog(err, forceKeepUpdated ? 'live' : 'manual'))
-    }
+  function handleExport(): void {
+    if (data.length === 0) return
+    setShowModal(true)
   }
 
   /**
@@ -400,7 +406,8 @@ export function ExportButton({ data, allData }: ExportButtonProps) {
   async function exportFiltered(): Promise<void> {
     try {
       setShowModal(false)
-      await exportRows('current', data, getFilename({ includeInstrument: true, suffix: 'filtered' }))
+      const suffix = activeFilters.length > 0 ? 'filtered' : undefined
+      await exportRows('current', data, getFilename({ includeInstrument: true, suffix }))
     } catch (err) {
       setExportError(buildExportErrorDialog(err, keepUpdated ? 'live' : 'manual'))
     }
@@ -432,26 +439,14 @@ export function ExportButton({ data, allData }: ExportButtonProps) {
   return (
     <div className="flex items-center gap-2">
       {!liveHandle && (
-        <>
-          <label className="flex items-center gap-1.5 cursor-pointer select-none">
-            <input
-              type="checkbox"
-              checked={keepUpdated}
-              onChange={e => handleKeepUpdatedChange(e.target.checked)}
-              className="h-3.5 w-3.5 accent-accent"
-            />
-            <span className="text-xs text-text-secondary">Keep updated</span>
-          </label>
-
-          <button
-            onClick={() => void handleExport()}
-            disabled={data.length === 0}
-            className="flex items-center gap-1.5 bg-surface-2 border border-border rounded px-2.5 py-1 text-xs text-text-secondary hover:text-text-primary hover:border-border-light transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            <Download size={13} />
-            Export CSV
-          </button>
-        </>
+        <button
+          onClick={handleExport}
+          disabled={data.length === 0}
+          className="flex items-center gap-1.5 bg-surface-2 border border-border rounded px-2.5 py-1 text-xs text-text-secondary hover:text-text-primary hover:border-border-light transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          <Download size={13} />
+          Export CSV
+        </button>
       )}
 
       {liveHandle && (
@@ -473,20 +468,20 @@ export function ExportButton({ data, allData }: ExportButtonProps) {
           <p className="text-xs text-text-secondary mb-4">
             To keep a CSV updated while you work, choose the export file once and allow this page to write to it. The file will update automatically until you stop live export or close the page.
           </p>
-          <div className="flex gap-2 justify-end">
+          <DialogFooter>
             <button
               onClick={() => setShowKeepUpdatedInfo(false)}
-              className="px-3 py-1.5 text-xs text-text-muted hover:text-text-primary transition-colors"
+              className={dialogCancelClass}
             >
               Cancel
             </button>
             <button
               onClick={() => void confirmKeepUpdated()}
-              className="px-3 py-1.5 text-xs bg-accent/20 border border-accent/40 rounded text-accent hover:bg-accent/30 transition-colors"
+              className={dialogPrimaryClass}
             >
               Select file
             </button>
-          </div>
+          </DialogFooter>
         </Dialog>
       )}
 
@@ -502,21 +497,21 @@ export function ExportButton({ data, allData }: ExportButtonProps) {
               className="bg-surface-2 border border-border rounded px-2.5 py-1.5 text-xs text-text-primary outline-none focus:border-accent/50 placeholder:text-text-muted"
             />
           </label>
-          <div className="flex gap-2 justify-end">
+          <DialogFooter>
             <button
               onClick={() => closeFilenamePrompt(null)}
-              className="px-3 py-1.5 text-xs text-text-muted hover:text-text-primary transition-colors"
+              className={dialogCancelClass}
             >
               Cancel
             </button>
             <button
               onClick={() => closeFilenamePrompt(filenameDraft)}
               disabled={!filenameDraft.trim()}
-              className="px-3 py-1.5 text-xs bg-accent/20 border border-accent/40 rounded text-accent hover:bg-accent/30 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              className={dialogPrimaryClass}
             >
               Export
             </button>
-          </div>
+          </DialogFooter>
         </Dialog>
       )}
 
@@ -525,14 +520,14 @@ export function ExportButton({ data, allData }: ExportButtonProps) {
           <p className="text-xs text-text-secondary mb-4">
             This browser does not allow the app to keep writing to a selected file. Use a Chromium-based browser with file-system access, or export manually when you want a new CSV.
           </p>
-          <div className="flex justify-end">
+          <DialogFooter>
             <button
               onClick={() => setShowUnsupportedInfo(false)}
-              className="px-3 py-1.5 text-xs bg-surface-2 border border-border rounded hover:border-border-light text-text-secondary hover:text-text-primary transition-colors"
+              className={dialogSecondaryClass}
             >
               OK
             </button>
-          </div>
+          </DialogFooter>
         </Dialog>
       )}
 
@@ -541,64 +536,81 @@ export function ExportButton({ data, allData }: ExportButtonProps) {
           <p className="text-xs text-text-secondary mb-4">
             {exportError.message}
           </p>
-          <div className="flex justify-end">
+          <DialogFooter>
             <button
               onClick={() => setExportError(null)}
-              className="px-3 py-1.5 text-xs bg-surface-2 border border-border rounded hover:border-border-light text-text-secondary hover:text-text-primary transition-colors"
+              className={dialogSecondaryClass}
             >
               OK
             </button>
-          </div>
+          </DialogFooter>
         </Dialog>
       )}
 
       {showModal && (
         <Dialog open={showModal} onClose={() => setShowModal(false)} title="Export CSV">
-          <p className="text-xs text-text-secondary mb-2">The following filters are active:</p>
-          <ul className="mb-4 space-y-1">
-            {activeFilters.map((f, i) => (
-              <li key={i} className="text-xs text-text-primary flex items-center gap-2">
-                <span className="w-1 h-1 rounded-full bg-accent shrink-0" />
-                {f}
-              </li>
-            ))}
-          </ul>
+          {activeFilters.length > 0 && (
+            <>
+              <p className="text-xs text-text-secondary mb-2">Active filters:</p>
+              <ul className="mb-4 space-y-1">
+                {activeFilters.map((f, i) => (
+                  <li key={i} className="text-xs text-text-primary flex items-center gap-2">
+                    <span className="w-1 h-1 rounded-full bg-accent shrink-0" />
+                    {f}
+                  </li>
+                ))}
+              </ul>
+              <p className="text-xs text-text-secondary mb-4">
+                Export filtered data ({data.length} rows) or all data ({allData.length} rows)?
+              </p>
+            </>
+          )}
 
-          <p className="text-xs text-text-secondary mb-4">
-            Do you want to export the filtered data ({data.length} rows) or all data ({allData.length} rows)?
-          </p>
+          <div className="flex flex-col gap-2 mb-4">
+            <label className="flex items-center gap-2 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={includeCalculated}
+                onChange={e => setIncludeCalculated(e.target.checked)}
+                className="h-3.5 w-3.5 accent-accent"
+              />
+              <span className="text-xs text-text-secondary">Include calculated fields (useful for Excel)</span>
+            </label>
 
-          <label className="flex items-center gap-2 mb-4 cursor-pointer select-none">
-            <input
-              type="checkbox"
-              checked={keepUpdated}
-              onChange={e => handleKeepUpdatedChange(e.target.checked)}
-              disabled={!!liveHandle}
-              className="h-3.5 w-3.5 accent-accent"
-            />
-            <span className="text-xs text-text-secondary">Keep selected export file updated while this page is open</span>
-          </label>
+            <label className="flex items-center gap-2 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={keepUpdated}
+                onChange={e => handleKeepUpdatedChange(e.target.checked)}
+                disabled={!!liveHandle}
+                className="h-3.5 w-3.5 accent-accent"
+              />
+              <span className="text-xs text-text-secondary">Keep file updated while page is open</span>
+            </label>
+          </div>
 
-          <div className="flex gap-2 justify-end">
+          <DialogFooter>
             <button
               onClick={() => setShowModal(false)}
-              className="px-3 py-1.5 text-xs text-text-muted hover:text-text-primary transition-colors"
+              className={dialogCancelClass}
             >
               Cancel
             </button>
+            {activeFilters.length > 0 && (
+              <button
+                onClick={() => void exportFiltered()}
+                className={dialogSecondaryClass}
+              >
+                Export filtered
+              </button>
+            )}
             <button
-              onClick={() => void exportFiltered()}
-              className="px-3 py-1.5 text-xs bg-surface-2 border border-border rounded hover:border-border-light text-text-secondary hover:text-text-primary transition-colors"
+              onClick={() => void (activeFilters.length > 0 ? exportAll() : exportFiltered())}
+              className={dialogPrimaryClass}
             >
-              Export filtered
+              {activeFilters.length > 0 ? 'Export all' : 'Export'}
             </button>
-            <button
-              onClick={() => void exportAll()}
-              className="px-3 py-1.5 text-xs bg-accent/20 border border-accent/40 rounded text-accent hover:bg-accent/30 transition-colors"
-            >
-              Export all
-            </button>
-          </div>
+          </DialogFooter>
         </Dialog>
       )}
     </div>

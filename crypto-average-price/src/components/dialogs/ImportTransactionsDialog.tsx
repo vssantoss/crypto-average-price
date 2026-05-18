@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useAppStore } from '../../store/useAppStore'
 import type { DuplicateImportDecision, DuplicateImportSummary } from '../../store/useAppStore'
 import { useExchangeList } from '../../store/selectors'
-import { Dialog } from '../common/Dialog'
+import { Dialog, DialogFooter, dialogCancelClass, dialogPrimaryClass } from '../common/Dialog'
 
 interface ImportTransactionsDialogProps {
   files: File[]
@@ -55,9 +55,8 @@ export function ImportTransactionsDialog({
       return
     }
 
-    const result = await importTransactions(imports, { confirmDuplicates })
-    if (result.cancelled) return
     onComplete()
+    await importTransactions(imports, { confirmDuplicates })
   }
 
   return (
@@ -91,20 +90,20 @@ export function ImportTransactionsDialog({
         <div className="mt-3 text-xs text-danger">{importError}</div>
       )}
 
-      <div className="flex gap-2 justify-end mt-5">
+      <DialogFooter>
         <button
           onClick={onClose}
-          className="px-3 py-1.5 text-xs text-text-muted hover:text-text-primary transition-colors"
+          className={dialogCancelClass}
         >
           Cancel
         </button>
         <button
           onClick={() => void submitTransactionImport()}
-          className="px-3 py-1.5 text-xs bg-accent/20 border border-accent/40 rounded text-accent hover:bg-accent/30 transition-colors"
+          className={dialogPrimaryClass}
         >
           Import
         </button>
-      </div>
+      </DialogFooter>
     </Dialog>
   )
 }

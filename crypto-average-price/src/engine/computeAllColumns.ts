@@ -1,7 +1,15 @@
 import type { CryptoComRow, ProcessedRow } from '../types/transaction'
 import { JournalType } from '../types/transaction'
 import type { PtaxMap } from '../types/ptax'
-import { buildTradeMatchIndex, buildTradeLinkIndex, findLinkedTradingPair, getTradeLinkMetadata } from './tradeMatching'
+import {
+  buildTradeMatchIndex,
+  buildTradeLinkIndex,
+  findLinkedTradingPair,
+  getLinkedTradeFeeQuantity,
+  getNetTransactionQuantity,
+  getTradeLinkMetadata,
+  isFoldedTradeFeeRow,
+} from './tradeMatching'
 import { calculateRunningBalances } from './runningBalance'
 import { lookupPtaxRate } from './ptaxLookup'
 import { calculateAveragePrices } from './averagePrice'
@@ -73,10 +81,11 @@ function canEditBrlTransactionCost(
 /**
  * Gets the USD quantity represented by a USD-like transaction row.
  * @param row - USD-like transaction row
+ * @param tradeLinkIndex - Fee-aware trade link index
  * @returns Absolute USD quantity, or null when no usable amount exists
  */
-function getUsdQuantity(row: CryptoComRow): number | null {
-  const quantity = Math.abs(row.transactionQuantity)
+function getUsdQuantity(row: CryptoComRow, tradeLinkIndex: ReturnType<typeof buildTradeLinkIndex>): number | null {
+  const quantity = Math.abs(getNetTransactionQuantity(row, tradeLinkIndex))
   if (quantity > 0) return quantity
 
   const cost = Math.abs(row.transactionCost)
@@ -88,7 +97,7 @@ function getUsdQuantity(row: CryptoComRow): number | null {
  * @param row - Transaction row to inspect
  * @param ptaxRate - PTAX rate for this row's date
  * @param tradeLinkIndex - Fee-aware trade link index
- * @returns Gross BRL acquisition cost, or null when this is not a linked stablecoin buy
+ * @returns Net BRL acquisition cost, or null when this is not a linked stablecoin buy
  */
 function computeLinkedUsdBuyCost(
   row: CryptoComRow,
@@ -107,7 +116,7 @@ function computeLinkedUsdBuyCost(
   const paired = findLinkedTradingPair(row, tradeLinkIndex)
   if (!paired || isUsdInstrument(paired.instrument) || paired.side !== 'SELL') return null
 
-  const usdQuantity = getUsdQuantity(row)
+  const usdQuantity = getUsdQuantity(row, tradeLinkIndex)
   return usdQuantity !== null ? usdQuantity * ptaxRate : null
 }
 
@@ -126,7 +135,7 @@ function computePtaxSaleValue(
   if (!isSaleOrWithdrawal(row) || ptaxRate === null) return null
 
   if (isUsdInstrument(row.instrument)) {
-    const usdQuantity = getUsdQuantity(row)
+    const usdQuantity = getUsdQuantity(row, tradeLinkIndex)
     return usdQuantity !== null ? usdQuantity * ptaxRate : null
   }
 
@@ -137,7 +146,7 @@ function computePtaxSaleValue(
   const paired = findLinkedTradingPair(row, tradeLinkIndex)
   if (!paired || !isUsdInstrument(paired.instrument)) return null
 
-  const pairedUsdQuantity = getUsdQuantity(paired)
+  const pairedUsdQuantity = getUsdQuantity(paired, tradeLinkIndex)
   return pairedUsdQuantity !== null ? pairedUsdQuantity * ptaxRate : null
 }
 
@@ -149,6 +158,7 @@ function computePtaxSaleValue(
  * @param tradeIndex - Trade match index used to find paired USD rows
  * @param tradeLinkIndex - Fee-aware trade link index used to find linked trade pairs
  * @param rows - Normalized rows for this instrument
+ * @param canEditBrl - Pre-computed editability flag (avoids redundant recomputation)
  * @returns BRL transaction cost, or null when required data is missing
  */
 function computeBrlTransactionCost(
@@ -157,12 +167,14 @@ function computeBrlTransactionCost(
   tradeIndex: ReturnType<typeof buildTradeMatchIndex>,
   tradeLinkIndex: ReturnType<typeof buildTradeLinkIndex>,
   rows: CryptoComRow[],
+  canEditBrl?: boolean,
 ): number | null {
   if (isMergedUsdInternalTrade(row, tradeIndex, rows)) {
     return null
   }
 
-  if (canEditBrlTransactionCost(row, tradeIndex, rows) && row.userBrlCost !== undefined) {
+  const canEdit = canEditBrl ?? canEditBrlTransactionCost(row, tradeIndex, rows)
+  if (canEdit && row.userBrlCost !== undefined) {
     return row.userBrlCost
   }
 
@@ -201,6 +213,7 @@ export function computeAllColumns(
     ? [instrument]
     : getUniqueInstruments(normalizedRows)
 
+  const rawByOrder = new Map(allRows.map(r => [r.order, r]))
   const allProcessedRows: ProcessedRow[] = []
 
   for (const inst of instruments) {
@@ -223,22 +236,25 @@ export function computeAllColumns(
       const avgResult = avgPriceResults[i]
       const ptaxRate = lookupPtaxRate(row.eventDate, ptaxMap)
 
-      const brlTransactionCost = computeBrlTransactionCost(row, ptaxRate, tradeIndex, tradeLinkIndex, instrumentRows)
+      const canEditBrl = canEditBrlTransactionCost(row, tradeIndex, instrumentRows)
+      const brlTransactionCost = computeBrlTransactionCost(row, ptaxRate, tradeIndex, tradeLinkIndex, instrumentRows, canEditBrl)
       const brlRunningBalance = avgResult.brlInvested
 
       const profitLoss = calculateProfitLoss(
         row,
         avgResult.avgPrice,
-        ptaxMap,
+        ptaxRate,
         tradeIndex,
         tradeLinkIndex,
         instrumentRows,
       )
 
-      // Find original instrument name (before merging)
-      const originalRow = allRows.find(r => r.order === row.order)
+      const originalRow = rawByOrder.get(row.order)
       const originalInstrument = originalRow?.instrument || row.instrument
       const tradeLink = getTradeLinkMetadata(originalRow || row, tradeLinkIndex)
+      const tradeFeeQuantity = getLinkedTradeFeeQuantity(originalRow || row, tradeLinkIndex)
+      const netTransactionQuantity = getNetTransactionQuantity(row, tradeLinkIndex)
+      const suppressCalculatedFields = isFoldedTradeFeeRow(originalRow || row, tradeLinkIndex)
 
       const processed: ProcessedRow = {
         id: `${row.order}-${row.instrument}`,
@@ -253,6 +269,8 @@ export function computeAllColumns(
         takerSide: row.takerSide,
         side: row.side,
         transactionQuantity: row.transactionQuantity,
+        tradeFeeQuantity,
+        netTransactionQuantity,
         transactionCost: row.transactionCost,
         runningBalance: balance,
         cambioBC: ptaxRate,
@@ -261,6 +279,7 @@ export function computeAllColumns(
         precoMedioCompra: avgResult.avgPrice,
         totalLucroPrejuizo: profitLoss,
         info: row.info || '',
+        suppressCalculatedFields,
         isTradeLinked: tradeLink.isLinked,
         isLinkedTradeFee: tradeLink.isFee,
         tradeGroupId: tradeLink.groupId,
@@ -271,7 +290,7 @@ export function computeAllColumns(
         hasPtaxWarning: false,
         hasBalanceOverride: row.balanceOverride !== undefined,
         isEditable: {
-          brlCost: canEditBrlTransactionCost(row, tradeIndex, instrumentRows),
+          brlCost: canEditBrl,
           avgPrice: true,
           info: true,
         },

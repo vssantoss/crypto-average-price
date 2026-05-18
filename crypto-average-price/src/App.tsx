@@ -10,10 +10,11 @@ import { TimezoneSelector } from './components/controls/TimezoneSelector'
 import { RoundBalanceToggle } from './components/controls/RoundBalanceToggle'
 import { DiagnosticsButton } from './components/controls/DiagnosticsButton'
 import { DataTable } from './components/table/DataTable'
+import { EmptyState, LoadingCard } from './components/layout/EmptyState'
 import { RecoveryDialog } from './components/dialogs/RecoveryDialog'
 import { AddRowDialog } from './components/dialogs/AddRowDialog'
 import { ImportTransactionsDialog } from './components/dialogs/ImportTransactionsDialog'
-import { Dialog } from './components/common/Dialog'
+import { Dialog, DialogFooter, dialogCancelClass, dialogPrimaryClass } from './components/common/Dialog'
 import { usePromiseDialog } from './hooks/usePromiseDialog'
 import { AlertTriangle, Trash2, ChevronDown, ChevronUp, FileUp, FolderInput, FileSpreadsheet, Plus } from 'lucide-react'
 
@@ -91,7 +92,7 @@ function App() {
   }
 
   return (
-    <div className="flex flex-col h-screen overflow-hidden">
+    <div className="flex flex-col h-screen overflow-hidden min-w-[1280px]">
       <RecoveryDialog />
       <AddRowDialog open={showAddRow} onClose={() => setShowAddRow(false)} />
 
@@ -121,20 +122,20 @@ function App() {
             />
             <span className="text-xs text-text-secondary">Create duplicated transactions</span>
           </label>
-          <div className="flex gap-2 justify-end">
+          <DialogFooter>
             <button
               onClick={() => duplicateConfirm.resolve('cancel')}
-              className="px-3 py-1.5 text-xs text-text-muted hover:text-text-primary transition-colors"
+              className={dialogCancelClass}
             >
               Cancel
             </button>
             <button
               onClick={() => duplicateConfirm.resolve(createDuplicateRows ? 'include' : 'skip')}
-              className="px-3 py-1.5 text-xs bg-accent/20 border border-accent/40 rounded text-accent hover:bg-accent/30 transition-colors"
+              className={dialogPrimaryClass}
             >
               Continue
             </button>
-          </div>
+          </DialogFooter>
         </Dialog>
       )}
 
@@ -144,7 +145,6 @@ function App() {
         <div className="flex items-center justify-between h-10 px-3">
           <div className="flex items-center gap-2">
             <h1 className="text-sm font-semibold text-text-primary">Crypto Average Price</h1>
-            {isLoading && <span className="text-xs text-accent animate-pulse">Processing...</span>}
           </div>
           <div className="flex items-center gap-2">
             <input ref={txRef} type="file" accept=".csv" multiple className="hidden" onChange={e => {
@@ -152,49 +152,49 @@ function App() {
               if (files && files.length > 0) handleImportTransactions(files)
               e.target.value = ''
             }} />
-            <button
-              onClick={() => txRef.current?.click()}
-              disabled={isLoading}
-              className="flex items-center gap-1.5 bg-accent/10 border border-accent/30 rounded px-2.5 py-1 text-xs text-accent hover:bg-accent/20 transition-colors disabled:opacity-40"
-            >
-              <FileUp size={13} />
-              Import Transactions
-            </button>
-
             <input ref={backupRef} type="file" accept=".csv" className="hidden" onChange={e => {
               const file = e.target.files?.[0]
               if (file) handleImportBackup(file)
               e.target.value = ''
             }} />
-            <button
-              onClick={() => backupRef.current?.click()}
-              disabled={isLoading}
-              className="flex items-center gap-1.5 bg-surface-2 border border-border rounded px-2.5 py-1 text-xs text-text-secondary hover:text-text-primary transition-colors disabled:opacity-40"
-            >
-              <FolderInput size={13} />
-              Import Backup
-            </button>
-
-            <button
-              onClick={clearAll}
-              disabled={!hasData}
-              className="flex items-center gap-1.5 bg-surface-2 border border-border rounded px-2.5 py-1 text-xs text-text-secondary hover:text-danger hover:border-danger/30 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              <Trash2 size={13} />
-              Clear
-            </button>
-
             {hasData && (
-              <button
-                onClick={() => {
-                  if (collapseTimer.current) clearTimeout(collapseTimer.current)
-                  setPanelExpanded(!expanded)
-                }}
-                className="flex items-center text-text-muted hover:text-text-primary transition-colors p-1"
-                title={expanded ? 'Collapse options' : 'Expand options'}
-              >
-                {expanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-              </button>
+              <>
+                <button
+                  onClick={() => txRef.current?.click()}
+                  disabled={isLoading}
+                  className="flex items-center gap-1.5 bg-accent/10 border border-accent/30 rounded px-2.5 py-1 text-xs text-accent hover:bg-accent/20 transition-colors disabled:opacity-40"
+                >
+                  <FileUp size={13} />
+                  Import Transactions
+                </button>
+
+                <button
+                  onClick={() => backupRef.current?.click()}
+                  disabled={isLoading}
+                  className="flex items-center gap-1.5 bg-surface-2 border border-border rounded px-2.5 py-1 text-xs text-text-secondary hover:text-text-primary transition-colors disabled:opacity-40"
+                >
+                  <FolderInput size={13} />
+                  Import Backup
+                </button>
+
+                <button
+                  onClick={clearAll}
+                  className="flex items-center gap-1.5 bg-surface-2 border border-border rounded px-2.5 py-1 text-xs text-text-secondary hover:text-danger hover:border-danger/30 transition-colors"
+                >
+                  <Trash2 size={13} />
+                  Clear
+                </button>
+                <button
+                  onClick={() => {
+                    if (collapseTimer.current) clearTimeout(collapseTimer.current)
+                    setPanelExpanded(!expanded)
+                  }}
+                  className="flex items-center text-text-muted hover:text-text-primary transition-colors p-1"
+                  title={expanded ? 'Collapse options' : 'Expand options'}
+                >
+                  {expanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                </button>
+              </>
             )}
           </div>
         </div>
@@ -267,8 +267,21 @@ function App() {
       </header>
 
       {/* DataTable fills remaining space */}
-      <main className="flex-1 min-h-0">
-        <DataTable data={processedRows} />
+      <main className="flex-1 min-h-0 relative">
+        {hasData ? (
+          <DataTable data={processedRows} />
+        ) : (
+          <EmptyState
+            onImportTransactions={() => txRef.current?.click()}
+            onImportBackup={() => backupRef.current?.click()}
+            isLoading={isLoading}
+          />
+        )}
+        {isLoading && hasData && (
+          <div className="absolute inset-0 z-30 flex items-center justify-center bg-surface-0/80">
+            <LoadingCard />
+          </div>
+        )}
       </main>
     </div>
   )

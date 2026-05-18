@@ -1,15 +1,13 @@
 import type { CryptoComRow } from '../types/transaction'
 import { JournalType } from '../types/transaction'
-import type { PtaxMap } from '../types/ptax'
 import type { TradeLinkIndex, TradeMatchIndex } from './tradeMatching'
-import { findLinkedTradingPair } from './tradeMatching'
-import { lookupPtaxRate } from './ptaxLookup'
+import { findLinkedTradingPair, getNetTransactionQuantity } from './tradeMatching'
 import { isUsdInstrument, isMergedUsdInternalTrade } from './usdMerge'
 
 /**
  * Checks whether a row can realize BRL profit/loss from a USD PTAX sale value.
  * @param row - Transaction row to inspect
- * @returns True when the row represents a sell or withdrawal disposition
+ * @returns True for SELL trades, offchain and onchain withdrawals
  */
 function isProfitLossDisposition(row: CryptoComRow): boolean {
   return (
@@ -21,20 +19,25 @@ function isProfitLossDisposition(row: CryptoComRow): boolean {
 
 /**
  * Gets the absolute transaction value from a row.
- * @param row - Transaction row containing Crypto.com quantity and cost fields
- * @returns Absolute transaction cost, falling back to quantity when cost is zero
+ * Prefers fee-aware transaction quantity; falls back to transactionCost.
+ * @param row - Transaction row to inspect
+ * @param tradeLinkIndex - Fee-aware trade link index
+ * @returns Absolute value of the transaction cost or quantity
  */
-function getAbsoluteRowValue(row: CryptoComRow): number {
-  const cost = Math.abs(row.transactionCost)
-  return cost > 0 ? cost : Math.abs(row.transactionQuantity)
+function getAbsoluteRowValue(row: CryptoComRow, tradeLinkIndex: TradeLinkIndex): number {
+  const quantity = Math.abs(getNetTransactionQuantity(row, tradeLinkIndex))
+  if (quantity > 0) return quantity
+
+  return Math.abs(row.transactionCost)
 }
 
 /**
  * Finds the USD side of a non-USD trade for sale proceeds calculation.
- * @param row - Non-USD trading SELL row
- * @param tradeIndex - Trade match index built from all imported rows
+ * Checks the fee-aware trade link index first, then falls back to tradeMatchId.
+ * @param row - The non-USD SELL row
+ * @param tradeIndex - Trade match index built from original rows
  * @param tradeLinkIndex - Fee-aware trade link index
- * @returns The most likely paired USD row, or null when none exists
+ * @returns The paired USD BUY row, or null if none found
  */
 function findUsdTradePair(
   row: CryptoComRow,
@@ -73,11 +76,13 @@ function findUsdTradePair(
 
 /**
  * Calculates BRL sale proceeds for a disposition row using PTAX.
- * @param row - Transaction row being sold or withdrawn
- * @param ptaxRate - PTAX venda rate for the row date
- * @param tradeIndex - Trade match index used to find paired USD rows
+ * For USD instruments, multiplies quantity by PTAX directly.
+ * For non-USD SELL trades, finds the paired USD row and uses its value.
+ * @param row - Transaction row to compute proceeds for
+ * @param ptaxRate - PTAX rate for this row's date
+ * @param tradeIndex - Trade match index built from original rows
  * @param tradeLinkIndex - Fee-aware trade link index
- * @returns BRL sale proceeds, or null when the sale value cannot be derived
+ * @returns BRL sale proceeds, or null when proceeds cannot be determined
  */
 function calculateBrlSaleProceeds(
   row: CryptoComRow,
@@ -85,7 +90,7 @@ function calculateBrlSaleProceeds(
   tradeIndex: TradeMatchIndex,
   tradeLinkIndex: TradeLinkIndex,
 ): number | null {
-  const quantity = Math.abs(row.transactionQuantity)
+  const quantity = Math.abs(getNetTransactionQuantity(row, tradeLinkIndex))
   if (quantity === 0) return null
 
   if (isUsdInstrument(row.instrument)) {
@@ -99,13 +104,13 @@ function calculateBrlSaleProceeds(
   const pairedUsdRow = findUsdTradePair(row, tradeIndex, tradeLinkIndex)
   if (!pairedUsdRow) return null
 
-  return getAbsoluteRowValue(pairedUsdRow) * ptaxRate
+  return getAbsoluteRowValue(pairedUsdRow, tradeLinkIndex) * ptaxRate
 }
 
 /**
  * Gets manually entered BRL sale proceeds for disposition rows.
- * @param row - Transaction row that may contain a manual BRL amount
- * @returns Manual BRL proceeds, or null when the row has no override
+ * @param row - Transaction row to inspect
+ * @returns The user-entered BRL cost, or null if not set
  */
 function getManualSaleProceeds(row: CryptoComRow): number | null {
   return row.userBrlCost !== undefined ? row.userBrlCost : null
@@ -113,19 +118,20 @@ function getManualSaleProceeds(row: CryptoComRow): number | null {
 
 /**
  * Calculates the profit/loss for a single transaction row.
- * Uses manual BRL proceeds first, falling back to PTAX sale proceeds.
- * @param row - The transaction row
- * @param avgPrice - The average BRL price at this row
- * @param ptaxMap - PTAX date-to-rate map
- * @param tradeIndex - Trade match index used to find paired USD sale rows
+ * Uses manual BRL sale proceeds first, then PTAX-derived proceeds.
+ * Profit/loss = sale proceeds − (avg price × quantity).
+ * @param row - Transaction row to compute P/L for
+ * @param avgPrice - Current BRL average purchase price per unit
+ * @param ptaxRate - PTAX rate for this row's date, or null if unavailable
+ * @param tradeIndex - Trade match index built from original rows
  * @param tradeLinkIndex - Fee-aware trade link index
- * @param rows - Normalized rows for this instrument
- * @returns BRL profit/loss, or null when it cannot be calculated
+ * @param rows - Normalized rows for this instrument (used for USD merge detection)
+ * @returns BRL profit/loss, or null when the row is not a disposition or data is missing
  */
 export function calculateProfitLoss(
   row: CryptoComRow,
   avgPrice: number | null,
-  ptaxMap: PtaxMap,
+  ptaxRate: number | null,
   tradeIndex: TradeMatchIndex,
   tradeLinkIndex: TradeLinkIndex,
   rows: CryptoComRow[] = [],
@@ -133,7 +139,7 @@ export function calculateProfitLoss(
   if (!isProfitLossDisposition(row) || avgPrice === null) return null
   if (isMergedUsdInternalTrade(row, tradeIndex, rows)) return null
 
-  const quantity = Math.abs(row.transactionQuantity)
+  const quantity = Math.abs(getNetTransactionQuantity(row, tradeLinkIndex))
   if (quantity === 0) return null
 
   const manualSaleProceeds = getManualSaleProceeds(row)
@@ -141,7 +147,6 @@ export function calculateProfitLoss(
     return manualSaleProceeds - avgPrice * quantity
   }
 
-  const ptaxRate = lookupPtaxRate(row.eventDate, ptaxMap)
   if (ptaxRate === null) return null
 
   const saleProceeds = calculateBrlSaleProceeds(row, ptaxRate, tradeIndex, tradeLinkIndex)
