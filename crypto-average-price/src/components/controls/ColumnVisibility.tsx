@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useAppStore, defaultColumnLayout } from '../../store/useAppStore'
 import { createColumns } from '../table/columns'
-import { Dialog } from '../common/Dialog'
-import { TABLE_ACTIONS_COLUMN_ID } from '../../types/app'
+import { Dialog, DialogFooter, dialogCancelClass, dialogPrimaryClass } from '../common/Dialog'
+import { TABLE_ACTIONS_COLUMN_ID, getVisibleStickyColumns } from '../../types/app'
 import { Columns3, X } from 'lucide-react'
+
+const actionBtnClass = 'px-2.5 py-1 text-xs bg-surface-2 border border-border rounded text-text-secondary hover:text-text-primary hover:border-border-light transition-colors'
 
 interface ColumnOption {
   id: string
@@ -12,8 +14,9 @@ interface ColumnOption {
 }
 
 /**
- * Builds the selectable column list shown in the layout dialog.
- * @returns Column ids and labels in datatable order
+ * Builds the list of column options for the visibility/sticky dialog.
+ * Includes the action column (always visible) and all data columns.
+ * @returns Array of column option objects with id, label, and alwaysVisible flag
  */
 function getColumnOptions(): ColumnOption[] {
   const actionColumn = {
@@ -33,22 +36,9 @@ function getColumnOptions(): ColumnOption[] {
 }
 
 /**
- * Removes sticky columns that are hidden in the provided visibility map.
- * @param stickyColumns - Column ids requested as sticky
- * @param columnVisibility - Visibility map where false means hidden
- * @returns Sticky column ids that are still visible
- */
-function getVisibleStickyColumns(
-  stickyColumns: string[],
-  columnVisibility: Record<string, boolean>,
-): string[] {
-  return stickyColumns.filter(column => columnVisibility[column] !== false)
-}
-
-/**
- * Builds a visibility map that explicitly shows every known column.
- * @param columns - Columns available in the layout dialog
- * @returns Visibility map with every column set to visible
+ * Creates a visibility map where all non-always-visible columns are shown.
+ * @param columns - Array of column options
+ * @returns Visibility record with all toggleable columns set to true
  */
 function getShowAllVisibility(columns: ColumnOption[]): Record<string, boolean> {
   return Object.fromEntries(
@@ -59,8 +49,9 @@ function getShowAllVisibility(columns: ColumnOption[]): Record<string, boolean> 
 }
 
 /**
- * Panel button and dialog for changing datatable visibility and sticky columns.
- * @returns Column layout button and modal dialog
+ * Column visibility and sticky column management control.
+ * Opens a dialog where users can toggle column visibility and pin columns.
+ * Provides live preview of layout changes in the data table.
  */
 export function ColumnVisibility() {
   const [open, setOpen] = useState(false)
@@ -80,29 +71,17 @@ export function ColumnVisibility() {
     })
   }, [draftStickyColumns, draftVisibility, open, setTableLayoutPreview])
 
-  /**
-   * Opens the dialog and initializes draft layout from saved settings.
-   * @returns Nothing
-   */
   function openDialog(): void {
     setDraftVisibility({ ...savedVisibility })
     setDraftStickyColumns(getVisibleStickyColumns(savedStickyColumns ?? [], savedVisibility))
     setOpen(true)
   }
 
-  /**
-   * Closes the dialog without saving draft layout changes.
-   * @returns Nothing
-   */
   function cancelDialog(): void {
     setOpen(false)
     setTableLayoutPreview(null)
   }
 
-  /**
-   * Saves the current draft layout and closes the dialog.
-   * @returns Nothing
-   */
   function saveDialog(): void {
     commitColumnLayout({
       columnVisibility: draftVisibility,
@@ -111,12 +90,6 @@ export function ColumnVisibility() {
     setOpen(false)
   }
 
-  /**
-   * Updates one column's visibility and removes stickiness when hiding it.
-   * @param column - Column id being changed
-   * @param visible - Whether the column should be visible
-   * @returns Nothing
-   */
   function setDraftColumnVisibility(column: string, visible: boolean): void {
     setDraftVisibility(current => ({ ...current, [column]: visible }))
     if (!visible) {
@@ -124,12 +97,6 @@ export function ColumnVisibility() {
     }
   }
 
-  /**
-   * Updates whether one visible column should stick to the left while scrolling.
-   * @param column - Column id being changed
-   * @param sticky - Whether the column should be sticky
-   * @returns Nothing
-   */
   function setDraftColumnSticky(column: string, sticky: boolean): void {
     setDraftStickyColumns(current => {
       if (sticky && !current.includes(column)) return [...current, column]
@@ -138,26 +105,14 @@ export function ColumnVisibility() {
     })
   }
 
-  /**
-   * Shows all known columns in the draft layout.
-   * @returns Nothing
-   */
   function showAllColumns(): void {
     setDraftVisibility(getShowAllVisibility(columns))
   }
 
-  /**
-   * Clears every sticky column in the draft layout.
-   * @returns Nothing
-   */
   function unstickAllColumns(): void {
     setDraftStickyColumns([])
   }
 
-  /**
-   * Restores the draft layout to the app's default column layout.
-   * @returns Nothing
-   */
   function resetDraftLayout(): void {
     setDraftVisibility({ ...defaultColumnLayout.columnVisibility })
     setDraftStickyColumns([...defaultColumnLayout.stickyColumns])
@@ -188,24 +143,9 @@ export function ColumnVisibility() {
         </div>
 
         <div className="flex flex-wrap gap-2 mb-3">
-          <button
-            onClick={showAllColumns}
-            className="px-2.5 py-1 text-xs bg-surface-2 border border-border rounded text-text-secondary hover:text-text-primary hover:border-border-light transition-colors"
-          >
-            Show all
-          </button>
-          <button
-            onClick={unstickAllColumns}
-            className="px-2.5 py-1 text-xs bg-surface-2 border border-border rounded text-text-secondary hover:text-text-primary hover:border-border-light transition-colors"
-          >
-            Unstick all
-          </button>
-          <button
-            onClick={resetDraftLayout}
-            className="px-2.5 py-1 text-xs bg-surface-2 border border-border rounded text-text-secondary hover:text-text-primary hover:border-border-light transition-colors"
-          >
-            Reset layout
-          </button>
+          <button onClick={showAllColumns} className={actionBtnClass}>Show all</button>
+          <button onClick={unstickAllColumns} className={actionBtnClass}>Unstick all</button>
+          <button onClick={resetDraftLayout} className={actionBtnClass}>Reset layout</button>
         </div>
 
         <div className="max-h-[420px] overflow-y-auto border border-border rounded bg-surface-2">
@@ -246,20 +186,20 @@ export function ColumnVisibility() {
           })}
         </div>
 
-        <div className="flex justify-end gap-2 mt-4">
+        <DialogFooter>
           <button
             onClick={cancelDialog}
-            className="px-3 py-1.5 text-xs text-text-muted hover:text-text-primary transition-colors"
+            className={dialogCancelClass}
           >
             Cancel
           </button>
           <button
             onClick={saveDialog}
-            className="px-3 py-1.5 text-xs bg-accent/20 border border-accent/40 rounded text-accent hover:bg-accent/30 transition-colors"
+            className={dialogPrimaryClass}
           >
             Save
           </button>
-        </div>
+        </DialogFooter>
       </Dialog>
     </>
   )

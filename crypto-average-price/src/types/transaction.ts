@@ -71,6 +71,8 @@ export interface ProcessedRow {
   takerSide: string
   side: TradeSide
   transactionQuantity: number
+  tradeFeeQuantity: number
+  netTransactionQuantity: number
   transactionCost: number
   runningBalance: number
   cambioBC: number | null
@@ -79,6 +81,7 @@ export interface ProcessedRow {
   precoMedioCompra: number | null
   totalLucroPrejuizo: number | null
   info: string
+  suppressCalculatedFields: boolean
   isTradeLinked: boolean
   isLinkedTradeFee: boolean
   tradeGroupId: string

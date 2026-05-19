@@ -1,15 +1,19 @@
-import { useCoinSummaries } from '../../store/selectors'
 import { useAppStore } from '../../store/useAppStore'
+import type { CoinSummary } from '../../types/app'
 import { formatBrl, formatNumber } from '../../utils/number'
 import { Coins } from 'lucide-react'
+
+interface SummaryPanelProps {
+  summaries: CoinSummary[]
+}
 
 /**
  * Displays summary statistics for each instrument.
  * Shows current balance, average price, and BRL balance.
+ * @param props - Summary rows to display
  * @returns Summary panel element
  */
-export function SummaryPanel() {
-  const summaries = useCoinSummaries()
+export function SummaryPanel({ summaries }: SummaryPanelProps) {
   const selected = useAppStore(s => s.settings.selectedInstrument)
   const ptaxMap = useAppStore(s => s.ptaxMap)
 

@@ -8,6 +8,7 @@ import { normalizeInstruments, getUniqueInstruments } from '../engine/usdMerge'
 interface AppComputedData {
   processedRows: ProcessedRow[]
   allProcessedRows: ProcessedRow[]
+  coinSummaries: CoinSummary[]
   ptaxWarnings: string[]
   diagnostics: string[]
 }
@@ -16,26 +17,20 @@ interface AppComputedData {
  * Builds diagnostic messages from raw and processed transaction data.
  * @param rawTransactions - Raw transaction rows from the store
  * @param allProcessedRows - Computed rows for all instruments
- * @param _ptaxMap - Imported PTAX rate map, currently ignored while PTAX math is disabled
- * @param _usdMergeEnabled - Whether USD instruments are merged, currently ignored for diagnostics
  * @returns User-facing diagnostic messages
  */
 function buildDiagnostics(
   rawTransactions: ReturnType<typeof useAppStore.getState>['rawTransactions'],
   allProcessedRows: ProcessedRow[],
-  _ptaxMap: ReturnType<typeof useAppStore.getState>['ptaxMap'],
-  _usdMergeEnabled: boolean,
 ): string[] {
-  void _ptaxMap
-  void _usdMergeEnabled
-
   if (rawTransactions.length === 0) return []
 
   const messages: string[] = []
+  const calculatedRows = allProcessedRows.filter(row => !row.suppressCalculatedFields)
 
-  const instruments = Array.from(new Set(allProcessedRows.map(row => row.instrument))).sort()
+  const instruments = Array.from(new Set(calculatedRows.map(row => row.instrument))).sort()
   const instrumentsWithoutAvgPrice = instruments.filter(inst => {
-    const rows = allProcessedRows.filter(r => r.instrument === inst)
+    const rows = calculatedRows.filter(r => r.instrument === inst)
     return rows.length > 0 && rows.every(r => r.precoMedioCompra === null)
   })
 
@@ -48,7 +43,7 @@ function buildDiagnostics(
   const hasAnyBalanceOverride = rawTransactions.some(r => r.balanceOverride !== undefined)
   if (!hasAnyBalanceOverride) {
     const negativeInstruments = instruments.filter(inst => {
-      const rows = allProcessedRows.filter(r => r.instrument === inst)
+      const rows = calculatedRows.filter(r => r.instrument === inst)
       return rows.some(r => r.runningBalance < -0.001)
     })
     if (negativeInstruments.length > 0) {
@@ -56,22 +51,42 @@ function buildDiagnostics(
     }
   }
 
-  const depositRows = rawTransactions.filter(
-    r => r.journalType === 'OFFCHAIN_DEPOSIT' || r.journalType === 'ONCHAIN_DEPOSIT'
+  const depositsWithoutCost = rawTransactions.filter(
+    r => (r.journalType === 'OFFCHAIN_DEPOSIT' || r.journalType === 'ONCHAIN_DEPOSIT') && r.userBrlCost === undefined
   )
-  if (depositRows.length > 0) {
-    const depositsWithoutCost = depositRows.filter(r => r.userBrlCost === undefined)
-    if (depositsWithoutCost.length > 0) {
-      messages.push(`${depositsWithoutCost.length} deposit${depositsWithoutCost.length > 1 ? 's' : ''} without BRL cost. Edit the BRL Tx Cost column on deposit rows to include the actual BRL amount paid.`)
-    }
+  if (depositsWithoutCost.length > 0) {
+    messages.push(`${depositsWithoutCost.length} deposit${depositsWithoutCost.length > 1 ? 's' : ''} without BRL cost. Edit the BRL Tx Cost column on deposit rows to include the actual BRL amount paid.`)
   }
 
   return messages
 }
 
 /**
+ * Builds latest summary values for each instrument from already-computed rows.
+ * @param rows - Processed rows for all instruments, sorted by transaction order
+ * @returns One summary per instrument using each instrument's last processed row
+ */
+function buildCoinSummaries(rows: ProcessedRow[]): CoinSummary[] {
+  const summaryByInstrument = new Map<string, CoinSummary>()
+
+  for (const row of rows) {
+    if (row.suppressCalculatedFields) continue
+
+    summaryByInstrument.set(row.instrument, {
+      instrument: row.instrument,
+      currentBalance: row.runningBalance,
+      averagePrice: row.precoMedioCompra,
+      totalBrlInvested: null,
+      brlBalance: row.brlRunningBalance,
+    })
+  }
+
+  return Array.from(summaryByInstrument.values()).sort((a, b) => a.instrument.localeCompare(b.instrument))
+}
+
+/**
  * Hook that returns the app's main computed data using one all-rows calculation.
- * @returns Processed rows, all processed rows, PTAX warnings, and diagnostics
+ * @returns Processed rows, all processed rows, coin summaries, PTAX warnings, and diagnostics
  */
 export function useAppComputedData(): AppComputedData {
   const rawTransactions = useAppStore(s => s.rawTransactions)
@@ -86,48 +101,17 @@ export function useAppComputedData(): AppComputedData {
     const processedRows = selectedInstrument
       ? allProcessedRows.filter(row => row.instrument === selectedInstrument)
       : allProcessedRows
-    const ptaxWarnings: string[] = []
-    const diagnostics = buildDiagnostics(rawTransactions, allProcessedRows, ptaxMap, usdMergeEnabled)
+    const coinSummaries = buildCoinSummaries(allProcessedRows)
+    const diagnostics = buildDiagnostics(rawTransactions, allProcessedRows)
 
     return {
       processedRows,
       allProcessedRows,
-      ptaxWarnings,
+      coinSummaries,
+      ptaxWarnings: [],
       diagnostics,
     }
   }, [rawTransactions, ptaxMap, usdMergeEnabled, selectedInstrument])
-}
-
-/**
- * Hook that returns computed/processed rows for the currently selected instrument.
- * Memoized to avoid recomputation on every render.
- * @returns Array of ProcessedRow objects ready for display
- */
-export function useProcessedRows(): ProcessedRow[] {
-  const rawTransactions = useAppStore(s => s.rawTransactions)
-  const ptaxMap = useAppStore(s => s.ptaxMap)
-  const usdMergeEnabled = useAppStore(s => s.settings.usdMergeEnabled)
-  const selectedInstrument = useAppStore(s => s.settings.selectedInstrument)
-
-  return useMemo(() => {
-    if (rawTransactions.length === 0) return []
-    return computeAllColumns(rawTransactions, ptaxMap, usdMergeEnabled, selectedInstrument)
-  }, [rawTransactions, ptaxMap, usdMergeEnabled, selectedInstrument])
-}
-
-/**
- * Hook that returns computed/processed rows for ALL instruments (ignoring coin filter).
- * Used for exporting all data regardless of current filter.
- */
-export function useAllProcessedRows(): ProcessedRow[] {
-  const rawTransactions = useAppStore(s => s.rawTransactions)
-  const ptaxMap = useAppStore(s => s.ptaxMap)
-  const usdMergeEnabled = useAppStore(s => s.settings.usdMergeEnabled)
-
-  return useMemo(() => {
-    if (rawTransactions.length === 0) return []
-    return computeAllColumns(rawTransactions, ptaxMap, usdMergeEnabled, null)
-  }, [rawTransactions, ptaxMap, usdMergeEnabled])
 }
 
 /**
@@ -158,69 +142,4 @@ export function useExchangeList(): string[] {
       .filter((exchange): exchange is string => !!exchange)
     return Array.from(new Set(exchanges)).sort()
   }, [rawTransactions])
-}
-
-/**
- * Hook that returns summary statistics for each instrument.
- * @returns Array of CoinSummary objects
- */
-export function useCoinSummaries(): CoinSummary[] {
-  const rawTransactions = useAppStore(s => s.rawTransactions)
-  const ptaxMap = useAppStore(s => s.ptaxMap)
-  const usdMergeEnabled = useAppStore(s => s.settings.usdMergeEnabled)
-
-  return useMemo(() => {
-    if (rawTransactions.length === 0) return []
-
-    const instruments = getUniqueInstruments(
-      normalizeInstruments(rawTransactions, usdMergeEnabled),
-    )
-
-    return instruments.map(inst => {
-      const rows = computeAllColumns(rawTransactions, ptaxMap, usdMergeEnabled, inst)
-
-      if (rows.length === 0) {
-        return {
-          instrument: inst,
-          currentBalance: 0,
-          averagePrice: null,
-          totalBrlInvested: null,
-          brlBalance: null,
-        }
-      }
-
-      const lastRow = rows[rows.length - 1]
-      return {
-        instrument: inst,
-        currentBalance: lastRow.runningBalance,
-        averagePrice: lastRow.precoMedioCompra,
-        totalBrlInvested: null,
-        brlBalance: lastRow.brlRunningBalance,
-      }
-    })
-  }, [rawTransactions, ptaxMap, usdMergeEnabled])
-}
-
-/**
- * Hook that returns diagnostic messages about missing data needed for full calculation.
- */
-export function useDiagnostics(): string[] {
-  const rawTransactions = useAppStore(s => s.rawTransactions)
-  const ptaxMap = useAppStore(s => s.ptaxMap)
-  const usdMergeEnabled = useAppStore(s => s.settings.usdMergeEnabled)
-
-  return useMemo(() => {
-    const allProcessedRows = rawTransactions.length === 0
-      ? []
-      : computeAllColumns(rawTransactions, ptaxMap, usdMergeEnabled, null)
-    return buildDiagnostics(rawTransactions, allProcessedRows, ptaxMap, usdMergeEnabled)
-  }, [rawTransactions, ptaxMap, usdMergeEnabled])
-}
-
-/**
- * Hook that returns dates with missing PTAX data for the current transactions.
- * @returns Array of ISO date strings that have no PTAX rate
- */
-export function usePtaxWarnings(): string[] {
-  return []
 }

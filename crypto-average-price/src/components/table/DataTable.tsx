@@ -21,7 +21,7 @@ import { createColumns } from './columns'
 import { ColumnFilter } from './ColumnFilter'
 import { EditableCell } from './EditableCell'
 import { AddRowDialog } from '../dialogs/AddRowDialog'
-import { Dialog } from '../common/Dialog'
+import { Dialog, DialogFooter, dialogCancelClass, dialogDangerClass } from '../common/Dialog'
 import type { CryptoComRow } from '../../types/transaction'
 import { AlertTriangle, ArrowUp, ArrowDown, Pencil, Trash2 } from 'lucide-react'
 
@@ -32,6 +32,16 @@ const caseInsensitiveFilter: FilterFn<ProcessedRow> = (row, columnId, filterValu
 import { formatNumber } from '../../utils/number'
 
 const ACTION_COLUMN_WIDTH = 40
+const CALCULATED_COLUMN_IDS = new Set([
+  'tradeFeeQuantity',
+  'netTransactionQuantity',
+  'runningBalance',
+  'cambioBC',
+  'brlRunningBalance',
+  'brlTransactionCost',
+  'precoMedioCompra',
+  'totalLucroPrejuizo',
+])
 
 /**
  * Props for the DataTable component.
@@ -49,87 +59,91 @@ interface StickyColumnRenderState {
   style: CSSProperties
 }
 
+type RowType = 'buy' | 'sell' | 'neutral'
+
 /**
- * Returns a CSS class for row background based on the transaction type.
- * Buy/deposit rows get a green tint, sell/withdrawal get red.
- * @param row - The processed row
- * @returns Tailwind CSS class string
+ * Determines the visual category of a row for styling.
+ * @param row - Processed row to classify
+ * @returns 'buy' for acquisitions/deposits, 'sell' for dispositions/withdrawals, 'neutral' otherwise
  */
-function getRowClass(row: ProcessedRow): string {
+function getRowType(row: ProcessedRow): RowType {
   if (
     row.side === 'BUY' ||
     row.journalType === JournalType.OFFCHAIN_DEPOSIT ||
     row.journalType === JournalType.ONCHAIN_DEPOSIT
-  ) {
-    return 'bg-buy-bg border-l-2 border-l-buy-border'
-  }
+  ) return 'buy'
   if (
     row.side === 'SELL' ||
     row.journalType === JournalType.OFFCHAIN_WITHDRAWAL ||
     row.journalType === JournalType.ONCHAIN_WITHDRAWAL
-  ) {
-    return 'bg-sell-bg border-l-2 border-l-sell-border'
-  }
+  ) return 'sell'
+  return 'neutral'
+}
+
+/**
+ * Returns CSS classes for a table row based on its buy/sell/neutral type.
+ * @param row - Processed row to style
+ * @returns Tailwind class string with background and left border color
+ */
+function getRowClass(row: ProcessedRow): string {
+  const type = getRowType(row)
+  if (type === 'buy') return 'bg-buy-bg border-l-2 border-l-buy-border'
+  if (type === 'sell') return 'bg-sell-bg border-l-2 border-l-sell-border'
   return 'border-l-2 border-l-transparent'
 }
 
 /**
- * Checks whether a table column contains numeric values.
- * @param meta - Column metadata from TanStack Table
- * @returns True when cells in this column should be right-aligned
+ * Checks whether a column should use right-aligned numeric formatting.
+ * @param meta - Column metadata from the column definition
+ * @returns True if the column is marked as numeric
  */
 function isNumericColumn(meta: TableColumnMeta | undefined): boolean {
   return meta?.numeric === true
 }
 
 /**
- * Builds the base class for datatable body cells.
- * @param numeric - Whether the cell contains a numeric value
- * @returns CSS class string for a body cell
+ * Returns CSS classes for a table body cell.
+ * @param numeric - Whether the cell contains numeric data (right-aligned)
+ * @returns Tailwind class string for the cell
  */
 function getBodyCellClass(numeric: boolean): string {
   return `px-3 py-1 border-b border-border/50 whitespace-nowrap ${numeric ? 'text-right tabular-nums' : ''}`
 }
 
 /**
- * Builds flex alignment classes for rendered cell content.
- * @param numeric - Whether the cell contains a numeric value
- * @returns CSS class string for cell content wrapper
+ * Returns CSS classes for the content wrapper inside a table cell.
+ * @param numeric - Whether the cell contains numeric data
+ * @returns Tailwind class string for the cell content div
  */
 function getCellContentClass(numeric: boolean): string {
   return `flex items-center gap-1 ${numeric ? 'justify-end tabular-nums' : ''}`
 }
 
 /**
- * Gets an opaque background color for sticky body cells.
- * @param row - The processed row rendered by the sticky cell
- * @returns CSS background color preserving the row's transaction tint
+ * Checks whether a calculated table cell should be blank for a processed row.
+ * @param row - Processed row being rendered
+ * @param columnId - Table column id being rendered
+ * @returns True when the cell should not show calculated data
  */
+function shouldBlankCalculatedCell(row: ProcessedRow, columnId: string): boolean {
+  return row.suppressCalculatedFields && CALCULATED_COLUMN_IDS.has(columnId)
+}
+
+// Opaque backgrounds for sticky cells — must match the row tint so content behind doesn't bleed through.
 function getStickyBodyBackground(row: ProcessedRow): string {
-  if (
-    row.side === 'BUY' ||
-    row.journalType === JournalType.OFFCHAIN_DEPOSIT ||
-    row.journalType === JournalType.ONCHAIN_DEPOSIT
-  ) {
-    return 'color-mix(in srgb, var(--color-surface-0) 82%, var(--color-success))'
-  }
-  if (
-    row.side === 'SELL' ||
-    row.journalType === JournalType.OFFCHAIN_WITHDRAWAL ||
-    row.journalType === JournalType.ONCHAIN_WITHDRAWAL
-  ) {
-    return 'color-mix(in srgb, var(--color-surface-0) 82%, var(--color-danger))'
-  }
+  const type = getRowType(row)
+  if (type === 'buy') return 'color-mix(in srgb, var(--color-surface-0) 82%, var(--color-success))'
+  if (type === 'sell') return 'color-mix(in srgb, var(--color-surface-0) 82%, var(--color-danger))'
   return 'var(--color-surface-0)'
 }
 
 /**
- * Builds sticky positioning props for a pinned table column.
- * @param column - TanStack table column
- * @param backgroundColor - Opaque background color for sticky overlap
- * @param zIndex - Layer order for the sticky cell
- * @param leftOffset - Extra left offset reserved before TanStack columns
- * @returns Extra class and style props for the rendered cell
+ * Computes the inline style for a sticky (pinned) data column.
+ * @param column - TanStack Table column instance
+ * @param backgroundColor - Opaque background color for the sticky cell
+ * @param zIndex - CSS z-index for stacking order
+ * @param leftOffset - Additional left offset (e.g., when action column is also sticky)
+ * @returns Object with the computed CSSProperties for the cell
  */
 function getStickyColumnRenderState(
   column: Column<ProcessedRow, unknown>,
@@ -151,20 +165,20 @@ function getStickyColumnRenderState(
 }
 
 /**
- * Checks whether the manual row action gutter should stick while scrolling.
- * @param stickyColumns - Active sticky column ids from the saved or preview layout
- * @returns True when the edit/delete gutter should be sticky
+ * Checks whether the action (edit/delete) column is in the sticky list.
+ * @param stickyColumns - Array of pinned column IDs
+ * @returns True if the action column should be sticky
  */
 function isActionColumnSticky(stickyColumns: string[]): boolean {
   return stickyColumns.includes(TABLE_ACTIONS_COLUMN_ID)
 }
 
 /**
- * Builds sticky positioning props for the manual edit/delete action gutter.
- * @param sticky - Whether the action gutter should be sticky
- * @param backgroundColor - Opaque background color for sticky overlap
- * @param zIndex - Layer order for the sticky cell
- * @returns Extra class and style props for the rendered action cell
+ * Computes the inline style for the sticky action column.
+ * @param sticky - Whether the action column is pinned
+ * @param backgroundColor - Opaque background color for the sticky cell
+ * @param zIndex - CSS z-index for stacking order
+ * @returns Object with the computed CSSProperties for the action cell
  */
 function getActionColumnRenderState(
   sticky: boolean,
@@ -184,10 +198,10 @@ function getActionColumnRenderState(
 }
 
 /**
- * Combines existing and sticky table cell styles.
- * @param baseStyle - Existing table cell dimensions
- * @param stickyStyle - Sticky column style overrides
- * @returns A merged style object for the rendered cell
+ * Merges base cell styles with sticky positioning styles.
+ * @param baseStyle - Base inline styles (e.g., width)
+ * @param stickyStyle - Sticky positioning styles (position, left, zIndex, background)
+ * @returns Combined CSSProperties object
  */
 function mergeCellStyle(baseStyle: CSSProperties, stickyStyle: CSSProperties): CSSProperties {
   return { ...baseStyle, ...stickyStyle }
@@ -297,10 +311,10 @@ export function DataTable({ data }: DataTableProps) {
           <p className="text-xs text-text-secondary mb-4">
             Delete row #{deleteOrder}?
           </p>
-          <div className="flex gap-2 justify-end">
+          <DialogFooter>
             <button
               onClick={() => setDeleteOrder(null)}
-              className="px-3 py-1.5 text-xs text-text-muted hover:text-text-primary transition-colors"
+              className={dialogCancelClass}
             >
               Cancel
             </button>
@@ -309,15 +323,15 @@ export function DataTable({ data }: DataTableProps) {
                 deleteRow(deleteOrder)
                 setDeleteOrder(null)
               }}
-              className="px-3 py-1.5 text-xs bg-danger/20 border border-danger/40 rounded text-danger hover:bg-danger/30 transition-colors"
+              className={dialogDangerClass}
             >
               Delete
             </button>
-          </div>
+          </DialogFooter>
         </Dialog>
       )}
       <table className="border-separate border-spacing-0 font-mono text-xs" style={{ minWidth: '100%' }}>
-        <thead className="bg-surface-2 sticky top-0 z-10">
+        <thead className="bg-surface-2 sticky top-0 z-40">
           {table.getHeaderGroups().map(headerGroup => (
             <tr key={headerGroup.id}>
               <th
@@ -362,9 +376,11 @@ export function DataTable({ data }: DataTableProps) {
         <tbody>
           {table.getRowModel().rows.map(row => {
             const original = row.original
+            const raw = rawByOrder.get(original.order)
+            const stickyBg = getStickyBodyBackground(original)
             const actionSticky = getActionColumnRenderState(
               actionColumnSticky,
-              getStickyBodyBackground(original),
+              stickyBg,
               21,
             )
             return (
@@ -379,7 +395,6 @@ export function DataTable({ data }: DataTableProps) {
                   <div className="flex w-full items-center justify-center gap-1 opacity-0 group-hover/row:opacity-100">
                     <button
                       onClick={() => {
-                        const raw = rawByOrder.get(original.order)
                         if (raw) setEditRow(raw)
                       }}
                       className="p-0 text-text-muted hover:text-accent transition-colors"
@@ -401,10 +416,20 @@ export function DataTable({ data }: DataTableProps) {
                   const numeric = isNumericColumn(meta)
                   const sticky = getStickyColumnRenderState(
                     cell.column,
-                    getStickyBodyBackground(original),
+                    stickyBg,
                     20,
                     stickyDataLeftOffset,
                   )
+
+                  if (shouldBlankCalculatedCell(original, cell.column.id)) {
+                    return (
+                      <td
+                        key={cell.id}
+                        className={getBodyCellClass(numeric)}
+                        style={sticky.style}
+                      />
+                    )
+                  }
 
                   // Render editable cells
                   if (meta?.editable === 'info') {
@@ -424,7 +449,6 @@ export function DataTable({ data }: DataTableProps) {
                   }
 
                   if (meta?.editable === 'avgPrice') {
-                    const raw = rawByOrder.get(original.order)
                     const calculatedValue = original.precoMedioCompra !== null ? original.precoMedioCompra.toFixed(roundBalance ? 2 : 4) : ''
                     const manualValue = raw?.avgPriceSeed !== undefined ? raw.avgPriceSeed.toString() : ''
 
@@ -452,7 +476,6 @@ export function DataTable({ data }: DataTableProps) {
 
                   // Editable running balance
                   if (cell.column.id === 'runningBalance') {
-                    const raw = rawByOrder.get(original.order)
                     const calculatedValue = formatNumber(original.runningBalance, roundBalance ? 2 : 8)
                     const manualValue = raw?.balanceOverride !== undefined ? raw.balanceOverride.toString() : ''
 
@@ -480,7 +503,6 @@ export function DataTable({ data }: DataTableProps) {
 
                   // Special: editable BRL cost for deposits
                   if (cell.column.id === 'brlTransactionCost' && original.isEditable.brlCost) {
-                    const raw = rawByOrder.get(original.order)
                     const calculatedValue = original.brlTransactionCost !== null ? original.brlTransactionCost.toFixed(roundBalance ? 2 : 4) : ''
                     const manualValue = raw?.userBrlCost !== undefined ? raw.userBrlCost.toString() : ''
 
@@ -546,11 +568,6 @@ export function DataTable({ data }: DataTableProps) {
           })}
         </tbody>
       </table>
-      {data.length === 0 && (
-        <div className="text-center py-16 font-mono text-xs text-text-muted">
-          Import a Crypto.com transaction report to get started.
-        </div>
-      )}
     </div>
   )
 }

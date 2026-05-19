@@ -19,6 +19,8 @@ export const EXPORT_CSV_COLUMNS = {
   TAKER_SIDE: 'Taker Side',
   SIDE: 'Side',
   TRANSACTION_QUANTITY: 'Transaction Quantity',
+  TRADE_FEE: 'Trade Fee',
+  NET_TRANSACTION_QUANTITY: 'Net Tx Quantity',
   TRANSACTION_COST: 'Transaction Cost',
   ORDER_ID: 'Order ID',
   TRADE_ID: 'Trade ID',
@@ -38,18 +40,35 @@ export const EXPORT_CSV_COLUMNS = {
 
 type ExportCsvRow = Record<string, string | number>
 
+export interface ExportCsvOptions {
+  includeCalculated?: boolean
+}
+
+/**
+ * Returns a calculated export value unless the row suppresses calculated fields.
+ * @param row - Processed row being exported
+ * @param value - Calculated value to export
+ * @returns Blank for suppressed rows, otherwise the provided calculated value
+ */
+function getCalculatedExportValue(row: ProcessedRow, value: string | number | null): string | number {
+  if (row.suppressCalculatedFields) return ''
+  return value ?? ''
+}
+
 /**
  * Builds one CSV export row from processed and raw transaction data.
  * @param row - Processed table row being exported
  * @param raw - Matching raw transaction with user override fields
+ * @param options - Export options (e.g. whether to include calculated columns)
  * @returns Plain object keyed by export CSV column name
  */
-export function buildExportCsvRow(row: ProcessedRow, raw?: CryptoComRow): ExportCsvRow {
+export function buildExportCsvRow(row: ProcessedRow, raw?: CryptoComRow, options?: ExportCsvOptions): ExportCsvRow {
   const C = EXPORT_CSV_COLUMNS
 
-  return {
+  const calc = options?.includeCalculated
+
+  const result: ExportCsvRow = {
     [C.ORDER]: row.order,
-    [C.JOURNAL_ID]: raw?.journalId ?? '',
     [C.TIME_UTC]: row.timeUtc,
     [C.EVENT_DATE]: row.eventDate,
     [C.JOURNAL_TYPE]: row.journalType,
@@ -58,24 +77,29 @@ export function buildExportCsvRow(row: ProcessedRow, raw?: CryptoComRow): Export
     [C.TAKER_SIDE]: row.takerSide,
     [C.SIDE]: row.side || '',
     [C.TRANSACTION_QUANTITY]: row.transactionQuantity,
+    ...(calc && { [C.TRADE_FEE]: getCalculatedExportValue(row, row.tradeFeeQuantity) }),
+    ...(calc && { [C.NET_TRANSACTION_QUANTITY]: getCalculatedExportValue(row, row.netTransactionQuantity) }),
     [C.TRANSACTION_COST]: row.transactionCost,
+    ...(calc && { [C.RUNNING_BALANCE]: getCalculatedExportValue(row, row.runningBalance) }),
+    [C.PTAX_RATE]: getCalculatedExportValue(row, row.cambioBC),
+    ...(calc && { [C.BRL_RUNNING_BALANCE]: getCalculatedExportValue(row, row.brlRunningBalance) }),
+    ...(calc && { [C.BRL_TRANSACTION_COST]: getCalculatedExportValue(row, row.brlTransactionCost) }),
+    ...(calc && { [C.BRL_AVG_PRICE]: getCalculatedExportValue(row, row.precoMedioCompra) }),
+    ...(calc && { [C.BRL_PROFIT_LOSS]: getCalculatedExportValue(row, row.totalLucroPrejuizo) }),
+    [C.INFO]: row.info,
+    [C.AVG_PRICE_SEED]: raw?.avgPriceSeed ?? '',
+    [C.USER_BRL_COST]: raw?.userBrlCost ?? '',
+    [C.BALANCE_OVERRIDE]: raw?.balanceOverride ?? '',
+    [C.JOURNAL_ID]: raw?.journalId ?? '',
     [C.ORDER_ID]: raw?.orderId ?? '',
     [C.TRADE_ID]: raw?.tradeId ?? '',
     [C.TRADE_MATCH_ID]: raw?.tradeMatchId ?? '',
     [C.CLIENT_ORDER_ID]: raw?.clientOrderId ?? '',
-    [C.RUNNING_BALANCE]: row.runningBalance,
-    [C.PTAX_RATE]: row.cambioBC ?? '',
-    [C.BRL_RUNNING_BALANCE]: row.brlRunningBalance ?? '',
-    [C.BRL_TRANSACTION_COST]: row.brlTransactionCost ?? '',
-    [C.BRL_AVG_PRICE]: row.precoMedioCompra ?? '',
-    [C.BRL_PROFIT_LOSS]: row.totalLucroPrejuizo ?? '',
-    [C.INFO]: row.info,
-    [C.AVG_PRICE_SEED]: raw?.avgPriceSeed !== undefined ? 'true' : '',
-    [C.USER_BRL_COST]: raw?.userBrlCost ?? '',
-    [C.BALANCE_OVERRIDE]: raw?.balanceOverride ?? '',
     [C.EXCHANGE]: row.exchangeName,
     [C.SOURCE_FILE]: row.sourceFileName,
   }
+
+  return result
 }
 
 /**
@@ -120,14 +144,17 @@ export function parseExportedCsvRow(rawRow: Record<string, string>): {
   const info = rawRow[C.INFO]?.trim() || ''
   if (info) transaction.info = info
 
-  const avgPriceVal = cleanCsvNumber(rawRow[C.BRL_AVG_PRICE] || '')
-  if (avgPriceVal > 0 && rawRow[C.AVG_PRICE_SEED] === 'true') {
-    transaction.avgPriceSeed = avgPriceVal
+  const avgSeedStr = rawRow[C.AVG_PRICE_SEED] || ''
+  if (avgSeedStr.trim() !== '') {
+    const avgSeedVal = avgSeedStr === 'true'
+      ? cleanCsvNumber(rawRow[C.BRL_AVG_PRICE] || '')
+      : cleanCsvNumber(avgSeedStr)
+    if (avgSeedVal > 0) transaction.avgPriceSeed = avgSeedVal
   }
 
-  const brlCostVal = cleanCsvNumber(rawRow[C.USER_BRL_COST] || '')
-  if (brlCostVal !== 0) {
-    transaction.userBrlCost = brlCostVal
+  const brlCostStr = rawRow[C.USER_BRL_COST] || ''
+  if (brlCostStr.trim() !== '') {
+    transaction.userBrlCost = cleanCsvNumber(brlCostStr)
   }
 
   const balOverride = rawRow[C.BALANCE_OVERRIDE] || ''

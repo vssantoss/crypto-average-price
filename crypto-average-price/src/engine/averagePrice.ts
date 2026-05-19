@@ -2,7 +2,7 @@ import type { CryptoComRow } from '../types/transaction'
 import { JournalType } from '../types/transaction'
 import type { PtaxMap } from '../types/ptax'
 import type { TradeLinkIndex, TradeMatchIndex } from './tradeMatching'
-import { findLinkedTradingPair } from './tradeMatching'
+import { findLinkedTradingPair, getLinkedTradeFeeQuantity, getNetTransactionQuantity, isFoldedTradeFeeRow } from './tradeMatching'
 import { lookupPtaxRate } from './ptaxLookup'
 import { isMergedUsdInternalTrade, isUsdInstrument } from './usdMerge'
 
@@ -21,6 +21,16 @@ function isDisposition(type: JournalType): boolean {
 }
 
 /**
+ * Gets the absolute quantity used for fee-aware cost-basis movement.
+ * @param row - Transaction row to inspect
+ * @param tradeLinkIndex - Fee-aware trade link index
+ * @returns Absolute net quantity after same-instrument linked trade fees
+ */
+function getCostBasisQuantity(row: CryptoComRow, tradeLinkIndex: TradeLinkIndex): number {
+  return Math.abs(getNetTransactionQuantity(row, tradeLinkIndex))
+}
+
+/**
  * Checks whether a row increases holdings and needs a BRL cost basis.
  * @param row - Transaction row to inspect
  * @returns True if the row should add BRL invested value when cost is known
@@ -35,7 +45,7 @@ function isCostedAcquisition(row: CryptoComRow): boolean {
 
 /**
  * Gets the BRL cost for a trading BUY row.
- * Stablecoin buys linked to non-USD sells use PTAX gross acquisition cost.
+ * Stablecoin buys linked to non-USD sells use PTAX net acquisition cost.
  * @param row - Trading BUY row
  * @param ptaxMap - PTAX date-to-rate map
  * @param tradeLinkIndex - Fee-aware trade link index
@@ -56,7 +66,7 @@ function getTradingBuyBrlCost(
   const ptaxRate = lookupPtaxRate(row.eventDate, ptaxMap)
   if (ptaxRate === null) return null
 
-  return Math.abs(row.transactionQuantity) * ptaxRate
+  return getCostBasisQuantity(row, tradeLinkIndex) * ptaxRate
 }
 
 /**
@@ -106,7 +116,9 @@ function forwardStep(
   tradeLinkIndex: TradeLinkIndex,
   rows: CryptoComRow[],
 ): number {
-  const absQty = Math.abs(row.transactionQuantity)
+  if (isFoldedTradeFeeRow(row, tradeLinkIndex)) return brlBefore
+
+  const absQty = getCostBasisQuantity(row, tradeLinkIndex)
   const avgBefore = balBefore > 0 ? brlBefore / balBefore : null
 
   if (row.journalType === JournalType.TRADING) {
@@ -157,6 +169,11 @@ function reverseStep(
   tradeLinkIndex: TradeLinkIndex,
   rows: CryptoComRow[],
 ): number | null {
+  if (isFoldedTradeFeeRow(row, tradeLinkIndex)) return brlAfter
+
+  const feeQuantity = getLinkedTradeFeeQuantity(row, tradeLinkIndex)
+  const absQty = getCostBasisQuantity(row, tradeLinkIndex)
+
   if (row.journalType === JournalType.TRADING) {
     if (row.side === 'BUY') {
       if (isMergedUsdInternalTrade(row, tradeIndex, rows)) {
@@ -167,6 +184,11 @@ function reverseStep(
       const cost = getRowCost(row, ptaxMap, tradeLinkIndex)
       return cost !== null ? brlAfter - cost : brlAfter
     } else if (row.side === 'SELL') {
+      if (feeQuantity > 0) {
+        const balanceAfterNetDisposition = balBefore - absQty
+        if (balanceAfterNetDisposition === 0) return null
+        return brlAfter * balBefore / balanceAfterNetDisposition
+      }
       if (balAfter === 0) return null
       return brlAfter * balBefore / balAfter
     }

@@ -5,19 +5,10 @@ import { formatBrl, formatUsd, formatNumber } from '../../utils/number'
 import { isUsdInstrument } from '../../engine/usdMerge'
 
 /**
- * Checks whether the table should format an instrument as USD currency.
- * @param instrument - Instrument name from a processed row
- * @returns True when the instrument represents USD or merged USD
- */
-function isUsdLike(instrument: string): boolean {
-  return isUsdInstrument(instrument)
-}
-
-/**
- * Applies the configured timezone offset to a UTC timestamp string.
- * @param timeStr - UTC timestamp in MM/DD/YYYY HH:MM:SS format
- * @param offsetHours - Number of hours to offset
- * @returns Timestamp string after applying the offset, or the original string if invalid
+ * Applies a timezone offset to a UTC time string for display.
+ * @param timeStr - Time string in MM/DD/YYYY HH:MM:SS format
+ * @param offsetHours - Hours to add (e.g., -3 for BRT)
+ * @returns Adjusted time string, or the original if offset is zero or format is invalid
  */
 function applyTimezoneOffset(timeStr: string, offsetHours: number): string {
   if (!offsetHours || !timeStr) return timeStr
@@ -36,9 +27,9 @@ function applyTimezoneOffset(timeStr: string, offsetHours: number): string {
 }
 
 /**
- * Formats a BRL value using the current rounding preference.
- * @param value - BRL value to format
- * @param roundBalance - Whether compact 2-decimal formatting is enabled
+ * Formats a BRL value with rounding control.
+ * @param value - BRL amount, or null
+ * @param roundBalance - When true, rounds to 2 decimal places; otherwise 4
  * @returns Formatted BRL string
  */
 function formatRoundedBrl(value: number | null, roundBalance: boolean): string {
@@ -48,9 +39,18 @@ function formatRoundedBrl(value: number | null, roundBalance: boolean): string {
 const columnHelper = createColumnHelper<ProcessedRow>()
 
 /**
- * Formats a row's linked trade metadata for display in the table.
- * @param row - Processed row with computed trade link fields
- * @returns Compact linked trade summary, or empty string when unlinked
+ * Checks whether a processed row should hide calculated table values.
+ * @param row - Processed row to inspect
+ * @returns True when calculated values should be blank for display
+ */
+function shouldHideCalculatedValue(row: ProcessedRow): boolean {
+  return row.suppressCalculatedFields
+}
+
+/**
+ * Formats a trade link summary string for display in the Trade Link column.
+ * @param row - Processed row with trade link metadata
+ * @returns Formatted trade link string, or empty string if not linked
  */
 function formatTradeLink(row: ProcessedRow): string {
   if (!row.isTradeLinked) return ''
@@ -66,8 +66,10 @@ function formatTradeLink(row: ProcessedRow): string {
 }
 
 /**
- * All column definitions for the datatable.
- * Includes raw data columns and computed BRL columns.
+ * Creates the TanStack Table column definitions for the data table.
+ * @param timezoneOffset - Hours offset from UTC for time display
+ * @param roundBalance - Whether to round BRL values to 2 decimal places
+ * @returns Array of column definitions
  */
 export function createColumns(timezoneOffset: number, roundBalance: boolean = false) {
   return [
@@ -113,6 +115,23 @@ export function createColumns(timezoneOffset: number, roundBalance: boolean = fa
     cell: info => formatNumber(info.getValue(), 8),
     meta: { numeric: true },
   }),
+  columnHelper.accessor('tradeFeeQuantity', {
+    header: 'Trade Fee',
+    size: 120,
+    cell: info => {
+      if (shouldHideCalculatedValue(info.row.original)) return ''
+      const value = info.getValue()
+      return value > 0 ? formatNumber(value, 8) : ''
+    },
+    enableColumnFilter: false,
+    meta: { numeric: true },
+  }),
+  columnHelper.accessor('netTransactionQuantity', {
+    header: 'Net Tx Quantity',
+    size: 140,
+    cell: info => shouldHideCalculatedValue(info.row.original) ? '' : formatNumber(info.getValue(), 8),
+    meta: { numeric: true },
+  }),
   columnHelper.accessor('transactionCost', {
     header: 'Tx Cost',
     size: 120,
@@ -123,8 +142,9 @@ export function createColumns(timezoneOffset: number, roundBalance: boolean = fa
     header: 'Running Balance',
     size: 140,
     cell: info => {
+      if (shouldHideCalculatedValue(info.row.original)) return ''
       const instrument = info.row.original.instrument
-      if (isUsdLike(instrument)) return formatUsd(info.getValue())
+      if (isUsdInstrument(instrument)) return formatUsd(info.getValue())
       return formatNumber(info.getValue(), roundBalance ? 2 : 8)
     },
     enableColumnFilter: false,
@@ -133,31 +153,28 @@ export function createColumns(timezoneOffset: number, roundBalance: boolean = fa
   columnHelper.accessor('cambioBC', {
     header: 'PTAX Rate',
     size: 110,
-    cell: info => {
-      const val = info.getValue()
-      return val !== null ? `R$ ${val.toFixed(4)}` : ''
-    },
+    cell: info => shouldHideCalculatedValue(info.row.original) ? '' : formatBrl(info.getValue(), 4),
     enableColumnFilter: false,
     meta: { numeric: true },
   }),
   columnHelper.accessor('brlRunningBalance', {
     header: 'BRL Balance',
     size: 140,
-    cell: info => formatRoundedBrl(info.getValue(), roundBalance),
+    cell: info => shouldHideCalculatedValue(info.row.original) ? '' : formatRoundedBrl(info.getValue(), roundBalance),
     enableColumnFilter: false,
     meta: { numeric: true },
   }),
   columnHelper.accessor('brlTransactionCost', {
     header: 'BRL Tx Cost',
     size: 140,
-    cell: info => formatNumber(info.getValue(), roundBalance ? 2 : 4),
+    cell: info => shouldHideCalculatedValue(info.row.original) ? '' : formatNumber(info.getValue(), roundBalance ? 2 : 4),
     enableColumnFilter: false,
     meta: { numeric: true },
   }),
   columnHelper.accessor('precoMedioCompra', {
     header: 'BRL Avg Price',
     size: 130,
-    cell: info => formatRoundedBrl(info.getValue(), roundBalance),
+    cell: info => shouldHideCalculatedValue(info.row.original) ? '' : formatRoundedBrl(info.getValue(), roundBalance),
     enableColumnFilter: false,
     meta: { editable: 'avgPrice' as const, numeric: true },
   }),
@@ -165,6 +182,7 @@ export function createColumns(timezoneOffset: number, roundBalance: boolean = fa
     header: 'BRL Profit/Loss',
     size: 130,
     cell: info => {
+      if (shouldHideCalculatedValue(info.row.original)) return ''
       const val = info.getValue()
       return formatRoundedBrl(val, roundBalance)
     },
@@ -196,9 +214,9 @@ export function createColumns(timezoneOffset: number, roundBalance: boolean = fa
 }
 
 /**
- * Formats a JournalType enum value into a more readable display string.
- * @param type - The journal type to format
- * @returns Formatted string with underscores replaced by spaces
+ * Formats a JournalType enum value for display by replacing underscores with spaces.
+ * @param type - Journal type enum value
+ * @returns Human-readable journal type string
  */
 function formatJournalType(type: JournalType): string {
   return type.replace(/_/g, ' ')

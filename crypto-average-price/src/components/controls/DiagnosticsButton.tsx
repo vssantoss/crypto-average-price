@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Dialog } from '../common/Dialog'
+import { Dialog, DialogFooter, dialogSecondaryClass } from '../common/Dialog'
 import { AlertTriangle, X } from 'lucide-react'
 
 interface DiagnosticsButtonProps {
@@ -46,14 +46,14 @@ export function DiagnosticsButton({ messages }: DiagnosticsButtonProps) {
             ))}
           </ul>
 
-          <div className="flex justify-end mt-5">
+          <DialogFooter>
             <button
               onClick={() => setShowModal(false)}
-              className="px-3 py-1.5 text-xs bg-surface-2 border border-border rounded hover:border-border-light text-text-secondary hover:text-text-primary transition-colors"
+              className={dialogSecondaryClass}
             >
               OK
             </button>
-          </div>
+          </DialogFooter>
         </Dialog>
       )}
     </>

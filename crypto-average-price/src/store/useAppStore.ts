@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import type { CryptoComRow } from '../types/transaction'
 import type { PtaxMap } from '../types/ptax'
-import type { AppSettings, TableLayoutSettings } from '../types/app'
+import { getVisibleStickyColumns, type AppSettings, type TableLayoutSettings } from '../types/app'
 import { parseCryptoComCsv } from '../parsers/cryptoCom'
 import { parsePtaxCsv, mergePtaxMaps } from '../parsers/ptax'
 import { parseExportedCsv } from '../parsers/outputCsv'
@@ -81,6 +81,10 @@ interface AppState {
  */
 export const defaultColumnLayout: TableLayoutSettings = {
   columnVisibility: {
+    order: false,
+    eventDate: false,
+    takerSide: false,
+    transactionCost: false,
     exchangeName: false,
     sourceFileName: false,
   },
@@ -100,53 +104,45 @@ const defaultSettings: AppSettings = {
 }
 
 /**
- * Removes sticky columns that are currently hidden by the visibility settings.
- * @param stickyColumns - Column ids requested as sticky
- * @param columnVisibility - Visibility map where false means hidden
- * @returns Sticky column ids that are still visible
+ * Parses a timeUtc string into milliseconds for efficient sorting.
+ * @param timeUtc - Time string in MM/DD/YYYY HH:MM:SS format
+ * @returns Milliseconds since epoch, or 0 if parsing fails
  */
-function getVisibleStickyColumns(
-  stickyColumns: string[],
-  columnVisibility: Record<string, boolean>,
-): string[] {
-  return stickyColumns.filter(column => columnVisibility[column] !== false)
+function parseTimeMs(timeUtc: string): number {
+  const m = timeUtc.match(/(\d+)\/(\d+)\/(\d+)\s+(\d+):(\d+):(\d+)/)
+  if (!m) return 0
+  return new Date(+m[3], +m[1] - 1, +m[2], +m[4], +m[5], +m[6]).getTime()
 }
 
 /**
- * Sorts rows by timeUtc then reassigns sequential order numbers starting at 1.
+ * Sorts rows by eventDate then timeUtc, then reassigns sequential order numbers starting at 1.
+ * @param rows - Array of transaction rows to sort and renumber
+ * @returns New array with updated order numbers
  */
 function sortAndRenumber(rows: CryptoComRow[]): CryptoComRow[] {
-  const sorted = [...rows].sort((a, b) => {
-    if (a.eventDate !== b.eventDate) return a.eventDate.localeCompare(b.eventDate)
-    if (a.timeUtc !== b.timeUtc) {
-      // Parse MM/DD/YYYY HH:MM:SS into comparable values
-      const pa = a.timeUtc.match(/(\d+)\/(\d+)\/(\d+)\s+(\d+):(\d+):(\d+)/)
-      const pb = b.timeUtc.match(/(\d+)\/(\d+)\/(\d+)\s+(\d+):(\d+):(\d+)/)
-      if (pa && pb) {
-        const ta = new Date(+pa[3], +pa[1] - 1, +pa[2], +pa[4], +pa[5], +pa[6]).getTime()
-        const tb = new Date(+pb[3], +pb[1] - 1, +pb[2], +pb[4], +pb[5], +pb[6]).getTime()
-        if (ta !== tb) return ta - tb
-      }
-    }
-    return a.order - b.order
+  const keyed = rows.map(r => ({ r, ms: parseTimeMs(r.timeUtc) }))
+  keyed.sort((a, b) => {
+    if (a.r.eventDate !== b.r.eventDate) return a.r.eventDate.localeCompare(b.r.eventDate)
+    if (a.ms !== b.ms) return a.ms - b.ms
+    return a.r.order - b.r.order
   })
-  return sorted.map((r, i) => ({ ...r, order: i + 1 }))
+  return keyed.map(({ r }, i) => ({ ...r, order: i + 1 }))
 }
 
 /**
- * Normalizes a value for transaction duplicate comparison.
- * @param value - Raw field value from a transaction row
- * @returns Trimmed, case-insensitive string value
+ * Normalizes a value for duplicate detection by trimming and lowercasing.
+ * @param value - Any value to normalize
+ * @returns Normalized string representation
  */
 function normalizeDuplicateValue(value: unknown): string {
   return String(value ?? '').trim().toLowerCase()
 }
 
 /**
- * Builds a stable key used to identify duplicate imported transactions.
+ * Builds a deduplication key for a transaction row.
  * Ignores order, source filename, and exchange name because those can differ between imports.
- * @param row - Transaction row to identify
- * @returns Stable duplicate key for import de-duplication
+ * @param row - Transaction row to generate a key for
+ * @returns Pipe-delimited key string
  */
 function getTransactionDuplicateKey(row: CryptoComRow): string {
   return [
@@ -180,15 +176,32 @@ function updateRowField<K extends keyof CryptoComRow>(
 }
 
 /**
- * Persists the current state to localStorage.
- * Called after every mutation.
+ * Debounced persistence to localStorage.
+ * Coalesces rapid mutations (e.g., inline edits) into a single write.
+ * Flushes immediately on page unload to prevent data loss.
  */
+let persistTimer: ReturnType<typeof setTimeout> | null = null
+let pendingState: AppState | null = null
+
 function persist(state: AppState): void {
-  saveSession(
-    state.rawTransactions,
-    state.ptaxMap,
-    state.settings,
-  )
+  pendingState = state
+  if (persistTimer !== null) return
+  persistTimer = setTimeout(flushPersist, 300)
+}
+
+function flushPersist(): void {
+  if (persistTimer !== null) {
+    clearTimeout(persistTimer)
+    persistTimer = null
+  }
+  if (pendingState) {
+    saveSession(pendingState.rawTransactions, pendingState.ptaxMap, pendingState.settings)
+    pendingState = null
+  }
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('beforeunload', flushPersist)
 }
 
 /**
@@ -268,11 +281,9 @@ export const useAppStore = create<AppState>()((set, get) => ({
   async importPtax(files: FileList) {
     set({ isLoading: true, error: null })
     try {
-      const maps: PtaxMap[] = []
-      for (let i = 0; i < files.length; i++) {
-        const map = await parsePtaxCsv(files[i])
-        maps.push(map)
-      }
+      const maps = await Promise.all(
+        Array.from(files).map(file => parsePtaxCsv(file))
+      )
       const currentMap = get().ptaxMap
       const merged = mergePtaxMaps(currentMap, ...maps)
       set({ ptaxMap: merged, isLoading: false })
@@ -474,6 +485,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
       activeTableFilters: [],
       error: null,
     })
-    persist(get())
+    pendingState = get()
+    flushPersist()
   },
 }))

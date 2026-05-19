@@ -3,7 +3,8 @@ import { useAppStore } from '../../store/useAppStore'
 import { useExchangeList } from '../../store/selectors'
 import { JournalType } from '../../types/transaction'
 import type { CryptoComRow, TradeSide } from '../../types/transaction'
-import { Dialog } from '../common/Dialog'
+import { parseCryptoComDate } from '../../utils/date'
+import { Dialog, DialogFooter, dialogCancelClass, dialogPrimaryClass } from '../common/Dialog'
 import { X } from 'lucide-react'
 
 interface AddRowDialogProps {
@@ -15,8 +16,8 @@ interface AddRowDialogProps {
 const journalTypes = Object.values(JournalType)
 
 /**
- * Builds the current UTC timestamp in the app's CSV time format.
- * @returns Current UTC time as MM/DD/YYYY HH:MM:SS
+ * Returns the current UTC time as a formatted string: MM/DD/YYYY HH:MM:SS.
+ * @returns Current UTC timestamp string
  */
 function nowUtcString(): string {
   const d = new Date()
@@ -30,19 +31,10 @@ function nowUtcString(): string {
 }
 
 /**
- * Converts a CSV timestamp into the event date used by transaction rows.
- * @param timeUtc - Timestamp in MM/DD/YYYY HH:MM:SS format
- * @returns Date string as YYYY-MM-DD, or an empty string when invalid
- */
-function timeToEventDate(timeUtc: string): string {
-  const parts = timeUtc.trim().split(' ')[0].split('/')
-  if (parts.length !== 3) return ''
-  return `${parts[2]}-${parts[0].padStart(2, '0')}-${parts[1].padStart(2, '0')}`
-}
-
-/**
- * Parses a time string in 24h or 12h (AM/PM) format and returns the date parts.
- * Returns null if the string is not a valid date.
+ * Parses a date/time string in 24h or 12h format into component parts.
+ * Accepts MM/DD/YYYY HH:MM:SS or MM/DD/YYYY HH:MM:SS AM/PM.
+ * @param timeUtc - Date/time string to parse
+ * @returns Parsed date components, or null if the format is invalid
  */
 function parseDateTime(timeUtc: string): { y: number; mo: number; d: number; h: number; mi: number; s: number } | null {
   const str = timeUtc.trim()
@@ -67,7 +59,10 @@ function parseDateTime(timeUtc: string): { y: number; mo: number; d: number; h: 
 }
 
 /**
- * Validates that a date string is a real date in MM/DD/YYYY HH:MM:SS or MM/DD/YYYY HH:MM:SS AM/PM format.
+ * Validates that a date/time string parses to a real calendar date.
+ * Checks that the parsed components round-trip through Date correctly.
+ * @param timeUtc - Date/time string to validate
+ * @returns True if the string represents a valid date
  */
 function isValidDate(timeUtc: string): boolean {
   const p = parseDateTime(timeUtc)
@@ -84,8 +79,10 @@ function isValidDate(timeUtc: string): boolean {
 }
 
 /**
- * Normalizes a time string to 24h format (MM/DD/YYYY HH:MM:SS).
- * If already 24h, returns as-is. If 12h AM/PM, converts.
+ * Normalizes a date/time string to 24-hour format: MM/DD/YYYY HH:MM:SS.
+ * Converts 12h AM/PM format to 24h. Returns trimmed input if parsing fails.
+ * @param timeUtc - Date/time string to normalize
+ * @returns Normalized 24h format string
  */
 function normalizeTo24h(timeUtc: string): string {
   const p = parseDateTime(timeUtc)
@@ -99,9 +96,10 @@ function normalizeTo24h(timeUtc: string): string {
 }
 
 /**
- * Normalizes manually entered instrument names before saving a row.
- * @param instrument - Raw instrument name from the form
- * @returns Canonical instrument name for storage
+ * Normalizes an instrument name for storage.
+ * Uppercases the input, with special handling for the merged USD stable coin name.
+ * @param instrument - Raw instrument name from user input
+ * @returns Normalized instrument name
  */
 function normalizeInstrumentInput(instrument: string): string {
   const trimmed = instrument.trim()
@@ -121,9 +119,10 @@ interface AddRowFormState {
 }
 
 /**
- * Creates the initial form state for either a new row or an existing row edit.
- * @param editRow - Existing row being edited, or null for a new manual row
- * @returns Initial form field values
+ * Creates the initial form state for adding or editing a transaction row.
+ * When editing, populates fields from the existing row; otherwise uses defaults.
+ * @param editRow - Existing row to edit, or null/undefined for a new row
+ * @returns Initial form state object
  */
 function createInitialFormState(editRow?: CryptoComRow | null): AddRowFormState {
   if (!editRow) {
@@ -152,9 +151,8 @@ function createInitialFormState(editRow?: CryptoComRow | null): AddRowFormState 
 }
 
 /**
- * Opens the manual transaction dialog when requested.
- * @param props - Dialog visibility, close handler, and optional row being edited
- * @returns Manual transaction dialog element, or null when closed
+ * Dialog for adding a new transaction row or editing an existing one.
+ * Wraps AddRowDialogContent with a key to reset state when switching between add/edit.
  */
 export function AddRowDialog({ open, onClose, editRow }: AddRowDialogProps) {
   if (!open) return null
@@ -169,11 +167,6 @@ export function AddRowDialog({ open, onClose, editRow }: AddRowDialogProps) {
   )
 }
 
-/**
- * Renders the manual transaction form with state initialized on mount.
- * @param props - Dialog visibility, close handler, and optional row being edited
- * @returns Manual transaction dialog form
- */
 function AddRowDialogContent({ open, onClose, editRow }: AddRowDialogProps) {
   const addManualRow = useAppStore(s => s.addManualRow)
   const updateRow = useAppStore(s => s.updateRow)
@@ -194,10 +187,6 @@ function AddRowDialogContent({ open, onClose, editRow }: AddRowDialogProps) {
   const isEdit = !!editRow
   const dateValid = isValidDate(timeUtc)
 
-  /**
-   * Saves the entered row, optionally accepting a new exchange name.
-   * @param allowNewExchange - Whether to save an unknown exchange without confirmation
-   */
   function handleSave(allowNewExchange = false) {
     const normalized = normalizeTo24h(timeUtc)
     const normalizedExchange = exchangeName.trim()
@@ -210,7 +199,7 @@ function AddRowDialogContent({ open, onClose, editRow }: AddRowDialogProps) {
     if (isEdit) {
       updateRow(editRow!.order, {
         timeUtc: normalized,
-        eventDate: timeToEventDate(normalized),
+        eventDate: parseCryptoComDate(normalized),
         journalType,
         exchangeName: normalizedExchange || undefined,
         instrument: normalizeInstrumentInput(instrument),
@@ -225,7 +214,7 @@ function AddRowDialogContent({ open, onClose, editRow }: AddRowDialogProps) {
         order: maxOrder + 1,
         journalId: '',
         timeUtc: normalized,
-        eventDate: timeToEventDate(normalized),
+        eventDate: parseCryptoComDate(normalized),
         journalType,
         exchangeName: normalizedExchange || undefined,
         instrument: normalizeInstrumentInput(instrument),
@@ -365,41 +354,41 @@ function AddRowDialogContent({ open, onClose, editRow }: AddRowDialogProps) {
           </div>
         </div>
 
-        <div className="flex gap-2 justify-end mt-5">
+        <DialogFooter>
           <button
             onClick={onClose}
-            className="px-3 py-1.5 text-xs text-text-muted hover:text-text-primary transition-colors"
+            className={dialogCancelClass}
           >
             Cancel
           </button>
           <button
             onClick={() => handleSave()}
             disabled={!instrument.trim() || !dateValid}
-            className="px-3 py-1.5 text-xs bg-accent/20 border border-accent/40 rounded text-accent hover:bg-accent/30 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            className={dialogPrimaryClass}
           >
             {isEdit ? 'Save' : 'Add'}
           </button>
-        </div>
+        </DialogFooter>
 
       {pendingNewExchange && (
         <Dialog open={!!pendingNewExchange} onClose={() => setPendingNewExchange(null)} title="Create Exchange" zIndex="z-[60]">
           <p className="text-xs text-text-secondary mb-4">
             Create new exchange "{pendingNewExchange}"?
           </p>
-          <div className="flex gap-2 justify-end">
+          <DialogFooter>
             <button
               onClick={() => setPendingNewExchange(null)}
-              className="px-3 py-1.5 text-xs text-text-muted hover:text-text-primary transition-colors"
+              className={dialogCancelClass}
             >
               Cancel
             </button>
             <button
               onClick={() => handleSave(true)}
-              className="px-3 py-1.5 text-xs bg-accent/20 border border-accent/40 rounded text-accent hover:bg-accent/30 transition-colors"
+              className={dialogPrimaryClass}
             >
               Create
             </button>
-          </div>
+          </DialogFooter>
         </Dialog>
       )}
     </Dialog>

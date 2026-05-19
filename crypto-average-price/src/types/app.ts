@@ -22,6 +22,13 @@ export interface TableLayoutSettings {
   stickyColumns: string[]
 }
 
+export function getVisibleStickyColumns(
+  stickyColumns: string[],
+  columnVisibility: Record<string, boolean>,
+): string[] {
+  return stickyColumns.filter(column => columnVisibility[column] !== false)
+}
+
 /**
  * Application settings that persist across sessions.
  */
