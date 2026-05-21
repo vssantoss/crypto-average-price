@@ -4,6 +4,8 @@ This document explains the math behind the fields the app calculates from import
 
 The calculations are done per instrument. If the `Merge USD` option is enabled, USD-like instruments such as `USD`, `USDC`, `USDT`, and `USD_Stable_Coin` are treated as one instrument named `USD (merged)`.
 
+Table filters only change which rows are displayed. Calculations always use the full imported dataset. Within that dataset, running balance and cost basis are calculated per instrument, while linked trade pairs may be detected across instruments before those per-instrument calculations run.
+
 ## Disclaimer
 
 This software is provided as is for personal recordkeeping and calculation assistance. It is not tax, legal, accounting, or financial advice, and it is not guaranteed to comply with the official tax rules, reporting requirements, or calculation methods of any country or jurisdiction. Review all results carefully and consult a qualified professional before using them for tax filings or official reporting.
@@ -51,6 +53,12 @@ previous running balance = current running balance - current row quantity
 ```
 
 Plain English: the app adds every incoming amount and subtracts every outgoing amount. If you manually tell the app the balance at one row, it uses that row as the known truth and fills the balances around it.
+
+### Manual Update Row
+
+A `MANUAL_UPDATE` row is a non-transaction row for anchoring information on a date. When it is used to enter the balance shown on an exchange, the row has zero transaction quantity and stores that exchange balance as a manual `Running Balance` override.
+
+This means the row does not add or remove units by itself. It only tells the app: "at this point in time, the balance for this instrument should be this value."
 
 ## PTAX Rate
 

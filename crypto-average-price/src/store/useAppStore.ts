@@ -45,6 +45,7 @@ interface AppState {
   settings: AppSettings
   tableLayoutPreview: TableLayoutSettings | null
   activeTableFilters: ActiveTableFilter[]
+  activeTableRowOrders: number[] | null
   isLoading: boolean
   error: string | null
 
@@ -61,13 +62,13 @@ interface AppState {
   setPanelExpanded: (expanded: boolean) => void
   toggleRoundBalance: () => void
   toggleUsdMerge: () => void
-  setSelectedInstrument: (instrument: string | null) => void
   setTimezoneOffset: (offset: number) => void
   setColumnVisibility: (column: string, visible: boolean) => void
   setTableLayoutPreview: (layout: TableLayoutSettings | null) => void
   commitColumnLayout: (layout: TableLayoutSettings) => void
   resetColumnLayout: () => void
   setActiveTableFilters: (filters: ActiveTableFilter[]) => void
+  setActiveTableRowOrders: (orders: number[]) => void
   restoreSession: (state: {
     rawTransactions: CryptoComRow[]
     ptaxMap: PtaxMap
@@ -96,7 +97,6 @@ export const defaultColumnLayout: TableLayoutSettings = {
  */
 const defaultSettings: AppSettings = {
   usdMergeEnabled: true,
-  selectedInstrument: null,
   ...defaultColumnLayout,
   timezoneOffset: 0,
   roundBalance: false,
@@ -215,6 +215,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
   settings: { ...defaultSettings },
   tableLayoutPreview: null,
   activeTableFilters: [],
+  activeTableRowOrders: null,
   isLoading: false,
   error: null,
 
@@ -387,15 +388,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
       settings: {
         ...state.settings,
         usdMergeEnabled: !state.settings.usdMergeEnabled,
-        selectedInstrument: null,
       },
-    }))
-    persist(get())
-  },
-
-  setSelectedInstrument(instrument: string | null) {
-    set(state => ({
-      settings: { ...state.settings, selectedInstrument: instrument },
     }))
     persist(get())
   },
@@ -453,6 +446,10 @@ export const useAppStore = create<AppState>()((set, get) => ({
     set({ activeTableFilters: filters })
   },
 
+  setActiveTableRowOrders(orders: number[]) {
+    set({ activeTableRowOrders: orders })
+  },
+
   restoreSession(restored) {
     set({
       rawTransactions: restored.rawTransactions,
@@ -483,6 +480,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
       settings: { ...defaultSettings },
       tableLayoutPreview: null,
       activeTableFilters: [],
+      activeTableRowOrders: null,
       error: null,
     })
     pendingState = get()

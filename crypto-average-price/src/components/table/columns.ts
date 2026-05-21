@@ -1,4 +1,4 @@
-import { createColumnHelper } from '@tanstack/react-table'
+import { createColumnHelper, type FilterFn } from '@tanstack/react-table'
 import type { ProcessedRow } from '../../types/transaction'
 import { JournalType } from '../../types/transaction'
 import { formatBrl, formatUsd, formatNumber } from '../../utils/number'
@@ -27,6 +27,16 @@ function applyTimezoneOffset(timeStr: string, offsetHours: number): string {
 }
 
 /**
+ * Extracts the year from a displayed time string.
+ * @param timeStr - Time string in MM/DD/YYYY HH:MM:SS format
+ * @returns Four-digit year, or empty string when the format is invalid
+ */
+function getTimeYear(timeStr: string): string {
+  const parts = timeStr.match(/^\d{2}\/\d{2}\/(\d{4})\s+/)
+  return parts?.[1] ?? ''
+}
+
+/**
  * Formats a BRL value with rounding control.
  * @param value - BRL amount, or null
  * @param roundBalance - When true, rounds to 2 decimal places; otherwise 4
@@ -37,6 +47,59 @@ function formatRoundedBrl(value: number | null, roundBalance: boolean): string {
 }
 
 const columnHelper = createColumnHelper<ProcessedRow>()
+
+/**
+ * Filters a column by an exact list of selected string values.
+ * @param row - Table row being evaluated
+ * @param columnId - Column id to read from the row
+ * @param filterValue - Selected values that should remain visible
+ * @returns True when the row value is included in the selected filter values
+ */
+const multiValueFilter: FilterFn<ProcessedRow> = (row, columnId, filterValue) => {
+  if (!Array.isArray(filterValue)) return true
+  return filterValue.includes(String(row.getValue(columnId) ?? ''))
+}
+
+/**
+ * Gets selected values from a checkbox-style filter value.
+ * @param filterValue - Raw TanStack filter value
+ * @returns Selected values, or null when every option is selected
+ */
+function getSelectedFilterValues(filterValue: unknown): string[] | null {
+  if (Array.isArray(filterValue)) return filterValue.map(String)
+  if (typeof filterValue === 'object' && filterValue !== null && 'values' in filterValue) {
+    const values = (filterValue as { values?: unknown }).values
+    return Array.isArray(values) ? values.map(String) : null
+  }
+  return null
+}
+
+/**
+ * Gets free-form text from a combined checkbox/text filter value.
+ * @param filterValue - Raw TanStack filter value
+ * @returns Lowercased filter text, or empty string when absent
+ */
+function getTextFilterValue(filterValue: unknown): string {
+  if (typeof filterValue !== 'object' || filterValue === null || !('text' in filterValue)) return ''
+  const text = (filterValue as { text?: unknown }).text
+  return typeof text === 'string' ? text.trim().toLowerCase() : ''
+}
+
+/**
+ * Builds a year filter for the time column using the displayed timezone-adjusted value.
+ * @param timezoneOffset - Hours offset from UTC for time display
+ * @returns TanStack filter function that matches selected years
+ */
+function createTimeYearFilter(timezoneOffset: number): FilterFn<ProcessedRow> {
+  return (row, columnId, filterValue) => {
+    const displayedTime = applyTimezoneOffset(String(row.getValue(columnId) ?? ''), timezoneOffset)
+    const selectedYears = getSelectedFilterValues(filterValue)
+    const yearMatches = selectedYears === null || selectedYears.includes(getTimeYear(displayedTime))
+    const textValue = getTextFilterValue(filterValue)
+    const textMatches = !textValue || displayedTime.toLowerCase().includes(textValue)
+    return yearMatches && textMatches
+  }
+}
 
 /**
  * Checks whether a processed row should hide calculated table values.
@@ -82,6 +145,12 @@ export function createColumns(timezoneOffset: number, roundBalance: boolean = fa
     header: timezoneOffset === 0 ? 'Time (UTC)' : `Time (UTC${timezoneOffset > 0 ? '+' : ''}${timezoneOffset})`,
     size: 160,
     cell: info => applyTimezoneOffset(info.getValue(), timezoneOffset),
+    filterFn: createTimeYearFilter(timezoneOffset),
+    meta: {
+      filterType: 'multiselect' as const,
+      getFilterOptionValue: (value: string) => getTimeYear(applyTimezoneOffset(value, timezoneOffset)),
+      textFilterPlaceholder: 'MM/DD/YYYY...',
+    },
   }),
   columnHelper.accessor('eventDate', {
     header: 'Event Date',
@@ -91,12 +160,17 @@ export function createColumns(timezoneOffset: number, roundBalance: boolean = fa
     header: 'Journal Type',
     size: 170,
     cell: info => formatJournalType(info.getValue()),
-    meta: { filterType: 'combo' as const },
+    filterFn: multiValueFilter,
+    meta: {
+      filterType: 'multiselect' as const,
+      formatFilterValue: formatJournalType,
+    },
   }),
   columnHelper.accessor('instrument', {
     header: 'Instrument',
     size: 130,
-    meta: { filterType: 'combo' as const },
+    filterFn: multiValueFilter,
+    meta: { filterType: 'multiselect' as const },
   }),
   columnHelper.accessor('takerSide', {
     header: 'Taker Side',

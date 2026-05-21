@@ -33,6 +33,7 @@ This app is a work in progress and is not even an alpha release. It may contain 
 |   +-- public/               # Static assets
 |   +-- package.json          # App scripts and dependencies
 |   +-- pnpm-lock.yaml        # Locked dependency versions
++-- scripts/                  # Shared local automation scripts
 +-- start.bat                 # Windows dev-server shortcut
 +-- start.sh                  # Shell dev-server shortcut
 +-- docs/                     # Project notes and planning docs
@@ -40,27 +41,24 @@ This app is a work in progress and is not even an alpha release. It may contain 
 
 ## Prerequisites
 
-- Node.js
-- pnpm
+- Node.js 20.19.0 or newer in the 20.x line, or Node.js 22.12.0 or newer.
+- pnpm 11.1.3.
+
+The start scripts check these requirements before starting the app. If Node.js or pnpm is missing or incompatible, the script prints step-by-step install instructions.
 
 ## Setup
 
-Install dependencies from the app directory:
-
-```sh
-cd crypto-average-price
-pnpm install
-```
+From a fresh clone, use the start script for your operating system. It checks the runtime, installs dependencies with `pnpm install --frozen-lockfile`, and starts the local dev server.
 
 ## Development
 
-Start the Vite dev server:
+From the workspace root, start the Vite dev server:
 
 ```sh
-pnpm dev
+pnpm start
 ```
 
-From the workspace root, you can also use:
+You can also use:
 
 ```sh
 ./start.sh
@@ -70,6 +68,13 @@ On Windows, run:
 
 ```bat
 start.bat
+```
+
+If you already have the correct dependencies installed and want to run the app directly:
+
+```sh
+cd crypto-average-price
+pnpm dev
 ```
 
 ## Build and Checks

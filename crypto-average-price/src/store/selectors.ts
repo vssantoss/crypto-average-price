@@ -3,7 +3,6 @@ import { useAppStore } from './useAppStore'
 import type { ProcessedRow } from '../types/transaction'
 import type { CoinSummary } from '../types/app'
 import { computeAllColumns } from '../engine/computeAllColumns'
-import { normalizeInstruments, getUniqueInstruments } from '../engine/usdMerge'
 
 interface AppComputedData {
   processedRows: ProcessedRow[]
@@ -92,15 +91,12 @@ export function useAppComputedData(): AppComputedData {
   const rawTransactions = useAppStore(s => s.rawTransactions)
   const ptaxMap = useAppStore(s => s.ptaxMap)
   const usdMergeEnabled = useAppStore(s => s.settings.usdMergeEnabled)
-  const selectedInstrument = useAppStore(s => s.settings.selectedInstrument)
 
   return useMemo(() => {
     const allProcessedRows = rawTransactions.length === 0
       ? []
       : computeAllColumns(rawTransactions, ptaxMap, usdMergeEnabled, null)
-    const processedRows = selectedInstrument
-      ? allProcessedRows.filter(row => row.instrument === selectedInstrument)
-      : allProcessedRows
+    const processedRows = allProcessedRows
     const coinSummaries = buildCoinSummaries(allProcessedRows)
     const diagnostics = buildDiagnostics(rawTransactions, allProcessedRows)
 
@@ -111,22 +107,7 @@ export function useAppComputedData(): AppComputedData {
       ptaxWarnings: [],
       diagnostics,
     }
-  }, [rawTransactions, ptaxMap, usdMergeEnabled, selectedInstrument])
-}
-
-/**
- * Hook that returns the list of unique instrument names available for selection.
- * Respects the USD merge toggle.
- * @returns Sorted array of instrument names
- */
-export function useInstrumentList(): string[] {
-  const rawTransactions = useAppStore(s => s.rawTransactions)
-  const usdMergeEnabled = useAppStore(s => s.settings.usdMergeEnabled)
-
-  return useMemo(() => {
-    const normalized = normalizeInstruments(rawTransactions, usdMergeEnabled)
-    return getUniqueInstruments(normalized)
-  }, [rawTransactions, usdMergeEnabled])
+  }, [rawTransactions, ptaxMap, usdMergeEnabled])
 }
 
 /**

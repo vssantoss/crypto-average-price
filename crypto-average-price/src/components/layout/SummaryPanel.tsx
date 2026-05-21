@@ -14,12 +14,8 @@ interface SummaryPanelProps {
  * @returns Summary panel element
  */
 export function SummaryPanel({ summaries }: SummaryPanelProps) {
-  const selected = useAppStore(s => s.settings.selectedInstrument)
   const ptaxMap = useAppStore(s => s.ptaxMap)
-
-  const displaySummaries = selected
-    ? summaries.filter(s => s.instrument === selected)
-    : summaries
+  const displaySummaries = summaries
 
   if (displaySummaries.length === 0) return null
 
