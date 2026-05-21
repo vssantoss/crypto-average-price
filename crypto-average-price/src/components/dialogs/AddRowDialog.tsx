@@ -116,6 +116,16 @@ interface AddRowFormState {
   quantity: string
   cost: string
   takerSide: string
+  balanceOverride: string
+}
+
+/**
+ * Checks whether a journal type is a manual non-transaction update row.
+ * @param journalType - Journal type selected in the form
+ * @returns True when the row should anchor manually entered information
+ */
+function isManualUpdate(journalType: JournalType): boolean {
+  return journalType === JournalType.MANUAL_UPDATE
 }
 
 /**
@@ -135,6 +145,7 @@ function createInitialFormState(editRow?: CryptoComRow | null): AddRowFormState 
       quantity: '',
       cost: '',
       takerSide: '',
+      balanceOverride: '',
     }
   }
 
@@ -147,6 +158,7 @@ function createInitialFormState(editRow?: CryptoComRow | null): AddRowFormState 
     quantity: editRow.transactionQuantity.toString(),
     cost: editRow.transactionCost.toString(),
     takerSide: editRow.takerSide,
+    balanceOverride: editRow.balanceOverride?.toString() ?? '',
   }
 }
 
@@ -181,15 +193,20 @@ function AddRowDialogContent({ open, onClose, editRow }: AddRowDialogProps) {
   const [quantity, setQuantity] = useState(initialState.quantity)
   const [cost, setCost] = useState(initialState.cost)
   const [takerSide, setTakerSide] = useState(initialState.takerSide)
+  const [balanceOverride, setBalanceOverride] = useState(initialState.balanceOverride)
   const [pendingNewExchange, setPendingNewExchange] = useState<string | null>(null)
   const knownExchanges = useExchangeList()
 
   const isEdit = !!editRow
   const dateValid = isValidDate(timeUtc)
+  const manualUpdate = isManualUpdate(journalType)
+  const balanceOverrideNumber = parseFloat(balanceOverride)
+  const balanceOverrideValid = !manualUpdate || (balanceOverride.trim() !== '' && !Number.isNaN(balanceOverrideNumber))
 
   function handleSave(allowNewExchange = false) {
     const normalized = normalizeTo24h(timeUtc)
     const normalizedExchange = exchangeName.trim()
+    const nextBalanceOverride = manualUpdate ? balanceOverrideNumber : editRow?.balanceOverride
 
     if (normalizedExchange && !knownExchanges.includes(normalizedExchange) && !allowNewExchange) {
       setPendingNewExchange(normalizedExchange)
@@ -203,10 +220,11 @@ function AddRowDialogContent({ open, onClose, editRow }: AddRowDialogProps) {
         journalType,
         exchangeName: normalizedExchange || undefined,
         instrument: normalizeInstrumentInput(instrument),
-        takerSide: takerSide.trim(),
-        side,
-        transactionQuantity: parseFloat(quantity) || 0,
-        transactionCost: parseFloat(cost) || 0,
+        takerSide: manualUpdate ? '' : takerSide.trim(),
+        side: manualUpdate ? null : side,
+        transactionQuantity: manualUpdate ? 0 : parseFloat(quantity) || 0,
+        transactionCost: manualUpdate ? 0 : parseFloat(cost) || 0,
+        balanceOverride: nextBalanceOverride,
       })
     } else {
       const maxOrder = rawTransactions.reduce((max, r) => Math.max(max, r.order), 0)
@@ -218,16 +236,17 @@ function AddRowDialogContent({ open, onClose, editRow }: AddRowDialogProps) {
         journalType,
         exchangeName: normalizedExchange || undefined,
         instrument: normalizeInstrumentInput(instrument),
-        takerSide: takerSide.trim(),
-        side,
-        transactionQuantity: parseFloat(quantity) || 0,
-        transactionCost: parseFloat(cost) || 0,
+        takerSide: manualUpdate ? '' : takerSide.trim(),
+        side: manualUpdate ? null : side,
+        transactionQuantity: manualUpdate ? 0 : parseFloat(quantity) || 0,
+        transactionCost: manualUpdate ? 0 : parseFloat(cost) || 0,
         usdBalance: 0,
         realizedPnl: 0,
         orderId: '',
         tradeId: '',
         tradeMatchId: '',
         clientOrderId: '',
+        balanceOverride: manualUpdate ? balanceOverrideNumber : undefined,
       }
       addManualRow(row)
     }
@@ -282,7 +301,16 @@ function AddRowDialogContent({ open, onClose, editRow }: AddRowDialogProps) {
               <span className="text-xs text-text-secondary">Journal Type</span>
               <select
                 value={journalType}
-                onChange={e => setJournalType(e.target.value as JournalType)}
+                onChange={e => {
+                  const nextJournalType = e.target.value as JournalType
+                  setJournalType(nextJournalType)
+                  if (isManualUpdate(nextJournalType)) {
+                    setSide(null)
+                    setQuantity('')
+                    setCost('')
+                    setTakerSide('')
+                  }
+                }}
                 className="bg-surface-2 border border-border rounded px-2.5 py-1.5 text-xs text-text-primary outline-none focus:border-accent/50"
               >
                 {journalTypes.map(t => (
@@ -303,55 +331,75 @@ function AddRowDialogContent({ open, onClose, editRow }: AddRowDialogProps) {
             </label>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          {manualUpdate ? (
             <label className="flex flex-col gap-1">
-              <span className="text-xs text-text-secondary">Side</span>
-              <select
-                value={side || ''}
-                onChange={e => setSide(e.target.value as TradeSide || null)}
-                className="bg-surface-2 border border-border rounded px-2.5 py-1.5 text-xs text-text-primary outline-none focus:border-accent/50"
-              >
-                <option value="">None</option>
-                <option value="BUY">BUY</option>
-                <option value="SELL">SELL</option>
-              </select>
-            </label>
-
-            <label className="flex flex-col gap-1">
-              <span className="text-xs text-text-secondary">Taker Side</span>
+              <span className="text-xs text-text-secondary">Exchange Balance</span>
               <input
                 type="text"
-                value={takerSide}
-                onChange={e => setTakerSide(e.target.value)}
-                placeholder="TAKER, MAKER..."
-                className="bg-surface-2 border border-border rounded px-2.5 py-1.5 text-xs text-text-primary outline-none focus:border-accent/50 placeholder:text-text-muted"
-              />
-            </label>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <label className="flex flex-col gap-1">
-              <span className="text-xs text-text-secondary">Transaction Quantity</span>
-              <input
-                type="text"
-                value={quantity}
-                onChange={e => setQuantity(e.target.value)}
+                value={balanceOverride}
+                onChange={e => setBalanceOverride(e.target.value)}
                 placeholder="0.00"
-                className="bg-surface-2 border border-border rounded px-2.5 py-1.5 text-xs text-text-primary outline-none focus:border-accent/50 placeholder:text-text-muted"
+                className={`bg-surface-2 border rounded px-2.5 py-1.5 text-xs text-text-primary outline-none placeholder:text-text-muted ${
+                  !balanceOverrideValid ? 'border-danger focus:border-danger' : 'border-border focus:border-accent/50'
+                }`}
               />
+              {!balanceOverrideValid && (
+                <span className="text-[10px] text-danger">Enter the balance shown on the exchange</span>
+              )}
             </label>
+          ) : (
+            <>
+              <div className="grid grid-cols-2 gap-3">
+                <label className="flex flex-col gap-1">
+                  <span className="text-xs text-text-secondary">Side</span>
+                  <select
+                    value={side || ''}
+                    onChange={e => setSide(e.target.value as TradeSide || null)}
+                    className="bg-surface-2 border border-border rounded px-2.5 py-1.5 text-xs text-text-primary outline-none focus:border-accent/50"
+                  >
+                    <option value="">None</option>
+                    <option value="BUY">BUY</option>
+                    <option value="SELL">SELL</option>
+                  </select>
+                </label>
 
-            <label className="flex flex-col gap-1">
-              <span className="text-xs text-text-secondary">Transaction Cost</span>
-              <input
-                type="text"
-                value={cost}
-                onChange={e => setCost(e.target.value)}
-                placeholder="0.00"
-                className="bg-surface-2 border border-border rounded px-2.5 py-1.5 text-xs text-text-primary outline-none focus:border-accent/50 placeholder:text-text-muted"
-              />
-            </label>
-          </div>
+                <label className="flex flex-col gap-1">
+                  <span className="text-xs text-text-secondary">Taker Side</span>
+                  <input
+                    type="text"
+                    value={takerSide}
+                    onChange={e => setTakerSide(e.target.value)}
+                    placeholder="TAKER, MAKER..."
+                    className="bg-surface-2 border border-border rounded px-2.5 py-1.5 text-xs text-text-primary outline-none focus:border-accent/50 placeholder:text-text-muted"
+                  />
+                </label>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <label className="flex flex-col gap-1">
+                  <span className="text-xs text-text-secondary">Transaction Quantity</span>
+                  <input
+                    type="text"
+                    value={quantity}
+                    onChange={e => setQuantity(e.target.value)}
+                    placeholder="0.00"
+                    className="bg-surface-2 border border-border rounded px-2.5 py-1.5 text-xs text-text-primary outline-none focus:border-accent/50 placeholder:text-text-muted"
+                  />
+                </label>
+
+                <label className="flex flex-col gap-1">
+                  <span className="text-xs text-text-secondary">Transaction Cost</span>
+                  <input
+                    type="text"
+                    value={cost}
+                    onChange={e => setCost(e.target.value)}
+                    placeholder="0.00"
+                    className="bg-surface-2 border border-border rounded px-2.5 py-1.5 text-xs text-text-primary outline-none focus:border-accent/50 placeholder:text-text-muted"
+                  />
+                </label>
+              </div>
+            </>
+          )}
         </div>
 
         <DialogFooter>
@@ -363,7 +411,7 @@ function AddRowDialogContent({ open, onClose, editRow }: AddRowDialogProps) {
           </button>
           <button
             onClick={() => handleSave()}
-            disabled={!instrument.trim() || !dateValid}
+            disabled={!instrument.trim() || !dateValid || !balanceOverrideValid}
             className={dialogPrimaryClass}
           >
             {isEdit ? 'Save' : 'Add'}

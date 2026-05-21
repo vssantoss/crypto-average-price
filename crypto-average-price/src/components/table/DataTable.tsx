@@ -208,6 +208,27 @@ function mergeCellStyle(baseStyle: CSSProperties, stickyStyle: CSSProperties): C
 }
 
 /**
+ * Formats a column filter value for status chips and export dialogs.
+ * @param value - Raw TanStack filter value
+ * @returns Human-readable filter value summary
+ */
+function formatActiveFilterValue(value: unknown): string {
+  if (Array.isArray(value)) return value.length > 0 ? value.map(String).join(', ') : 'None'
+  if (typeof value === 'object' && value !== null) {
+    const filterValue = value as { values?: unknown; text?: unknown }
+    const parts: string[] = []
+    if (Array.isArray(filterValue.values)) {
+      parts.push(filterValue.values.length > 0 ? filterValue.values.map(String).join(', ') : 'None')
+    }
+    if (typeof filterValue.text === 'string' && filterValue.text.trim()) {
+      parts.push(`contains "${filterValue.text.trim()}"`)
+    }
+    return parts.join('; ')
+  }
+  return String(value)
+}
+
+/**
  * Main datatable component.
  * Renders a TanStack Table with sorting, filtering, column visibility,
  * and inline-editable cells for Info, BRL cost, and avg price seed.
@@ -234,6 +255,7 @@ export function DataTable({ data }: DataTableProps) {
   )
   const stickyDataLeftOffset = actionColumnSticky ? ACTION_COLUMN_WIDTH : 0
   const setActiveTableFilters = useAppStore(s => s.setActiveTableFilters)
+  const setActiveTableRowOrders = useAppStore(s => s.setActiveTableRowOrders)
   const setInfoEdit = useAppStore(s => s.setInfoEdit)
   const setAvgPriceSeed = useAppStore(s => s.setAvgPriceSeed)
   const setUserBrlCost = useAppStore(s => s.setUserBrlCost)
@@ -261,7 +283,7 @@ export function DataTable({ data }: DataTableProps) {
 
   const activeFilters = useMemo(() => {
     return columnFilters
-      .map(f => ({ column: headerMap[f.id] || f.id, value: String(f.value) }))
+      .map(f => ({ column: headerMap[f.id] || f.id, value: formatActiveFilterValue(f.value) }))
       .filter(f => f.value)
   }, [columnFilters, headerMap])
 
@@ -297,6 +319,11 @@ export function DataTable({ data }: DataTableProps) {
     getFilteredRowModel: getFilteredRowModel(),
     getFacetedUniqueValues: getFacetedUniqueValues(),
   })
+
+  useEffect(() => {
+    setActiveTableRowOrders(table.getRowModel().rows.map(row => row.original.order))
+  }, [columnFilters, data, setActiveTableRowOrders, sorting, table])
+
   const actionHeaderSticky = getActionColumnRenderState(
     actionColumnSticky,
     'var(--color-surface-2)',
@@ -437,12 +464,17 @@ export function DataTable({ data }: DataTableProps) {
                       <td
                         key={cell.id}
                         className="px-2 py-1 border-b border-border/50"
-                        style={sticky.style}
+                        style={mergeCellStyle({
+                          width: cell.column.getSize(),
+                          minWidth: cell.column.getSize(),
+                          maxWidth: cell.column.getSize(),
+                        }, sticky.style)}
                       >
                         <EditableCell
                           value={original.info}
                           onSave={val => setInfoEdit(original.order, val)}
                           placeholder="Add note..."
+                          title={original.info || 'Click to edit'}
                         />
                       </td>
                     )

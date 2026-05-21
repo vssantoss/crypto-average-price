@@ -22,22 +22,27 @@ export interface TableLayoutSettings {
   stickyColumns: string[]
 }
 
-export function getVisibleStickyColumns(
-  stickyColumns: string[],
-  columnVisibility: Record<string, boolean>,
-): string[] {
-  return stickyColumns.filter(column => columnVisibility[column] !== false)
-}
-
 /**
  * Application settings that persist across sessions.
  */
 export interface AppSettings extends TableLayoutSettings {
   usdMergeEnabled: boolean
-  selectedInstrument: string | null
   timezoneOffset: number
   roundBalance: boolean
   panelExpanded: boolean
+}
+
+/**
+ * Filters sticky column ids down to columns that are currently visible.
+ * @param stickyColumns - Column ids configured as sticky
+ * @param columnVisibility - Column visibility map where false means hidden
+ * @returns Sticky column ids that are still visible
+ */
+export function getVisibleStickyColumns(
+  stickyColumns: string[],
+  columnVisibility: Record<string, boolean>,
+): string[] {
+  return stickyColumns.filter(column => columnVisibility[column] !== false)
 }
 
 /**

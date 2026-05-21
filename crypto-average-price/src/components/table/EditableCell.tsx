@@ -12,6 +12,7 @@ interface EditableCellProps {
   placeholder?: string
   className?: string
   showIcon?: boolean
+  title?: string
 }
 
 /**
@@ -28,6 +29,7 @@ export function EditableCell({
   placeholder,
   className,
   showIcon = true,
+  title,
 }: EditableCellProps) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(editValue ?? value)
@@ -87,14 +89,14 @@ export function EditableCell({
 
   return (
     <div
-      className={`group flex items-center gap-1 cursor-pointer min-h-[24px] rounded px-1.5 py-0.5 hover:bg-surface-3/50 ${className || ''}`}
+      className={`group flex w-full min-w-0 max-w-full items-center gap-1 cursor-pointer min-h-[24px] rounded px-1.5 py-0.5 hover:bg-surface-3/50 ${className || ''}`}
       onClick={() => {
         setDraft(editableValue)
         setEditing(true)
       }}
-      title="Click to edit"
+      title={title ?? 'Click to edit'}
     >
-      <span className={`text-xs truncate ${value ? 'text-text-primary' : 'text-text-muted italic'}`}>
+      <span className={`min-w-0 truncate text-xs ${value ? 'text-text-primary' : 'text-text-muted italic'}`}>
         {value || placeholder || '—'}
       </span>
       {showIcon && (

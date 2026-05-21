@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import Papa from 'papaparse'
 import type { ProcessedRow } from '../../types/transaction'
 import { useAppStore } from '../../store/useAppStore'
@@ -203,13 +203,18 @@ export function ExportButton({ data, allData }: ExportButtonProps) {
   const [liveStatus, setLiveStatus] = useState('')
   const liveWriteRunning = useRef(false)
   const liveWritePending = useRef(false)
-  const instrument = useAppStore(s => s.settings.selectedInstrument)
   const activeTableFilters = useAppStore(s => s.activeTableFilters)
-  const activeFilters = [
-    ...(instrument ? [`Coin: ${instrument}`] : []),
-    ...activeTableFilters.map(f => `${f.column}: "${f.value}"`),
-  ]
-  const liveRows = liveMode === 'all' ? allData : data
+  const activeTableRowOrders = useAppStore(s => s.activeTableRowOrders)
+  const dataByOrder = useMemo(() => new Map(data.map(row => [row.order, row])), [data])
+  const currentData = useMemo(() => {
+    if (!activeTableRowOrders) return data
+    return activeTableRowOrders.flatMap(order => {
+      const row = dataByOrder.get(order)
+      return row ? [row] : []
+    })
+  }, [activeTableRowOrders, data, dataByOrder])
+  const activeFilters = activeTableFilters.map(f => `${f.column}: "${f.value}"`)
+  const liveRows = liveMode === 'all' ? allData : currentData
 
   /**
    * Opens an in-app filename prompt for browsers without native save picker support.
@@ -282,15 +287,13 @@ export function ExportButton({ data, allData }: ExportButtonProps) {
 
   /**
    * Builds the default export filename from current filter context.
-   * @param opts - Filename suffix and instrument inclusion options
+   * @param opts - Optional filename suffix
    * @returns Suggested CSV filename
    */
-  function getFilename(opts?: { suffix?: string; includeInstrument?: boolean }) {
+  function getFilename(opts?: { suffix?: string }) {
     if (lastExportFilename) return lastExportFilename
 
-    const safeInstrument = instrument?.replace(/[^a-zA-Z0-9_-]/g, '') || ''
     const parts = ['crypto-avg-price']
-    if (safeInstrument && opts?.includeInstrument) parts.push(safeInstrument)
     if (opts?.suffix) parts.push(opts.suffix)
     parts.push(new Date().toISOString().split('T')[0])
     return parts.join('-') + '.csv'
@@ -327,7 +330,7 @@ export function ExportButton({ data, allData }: ExportButtonProps) {
 
     if (!showModal) {
       try {
-        await exportRows('current', data, getFilename({ includeInstrument: true }), true)
+        await exportRows('current', currentData, getFilename(), true)
       } catch (err) {
         setExportError(buildExportErrorDialog(err, 'live'))
       }
@@ -337,7 +340,7 @@ export function ExportButton({ data, allData }: ExportButtonProps) {
     if (activeFilters.length === 0) {
       try {
         setShowModal(false)
-        await exportRows('current', data, getFilename({ includeInstrument: true }), true)
+        await exportRows('current', currentData, getFilename(), true)
       } catch (err) {
         setExportError(buildExportErrorDialog(err, 'live'))
       }
@@ -395,7 +398,7 @@ export function ExportButton({ data, allData }: ExportButtonProps) {
    * Opens the export options dialog.
    */
   function handleExport(): void {
-    if (data.length === 0) return
+    if (allData.length === 0) return
     setShowModal(true)
   }
 
@@ -407,7 +410,7 @@ export function ExportButton({ data, allData }: ExportButtonProps) {
     try {
       setShowModal(false)
       const suffix = activeFilters.length > 0 ? 'filtered' : undefined
-      await exportRows('current', data, getFilename({ includeInstrument: true, suffix }))
+      await exportRows('current', currentData, getFilename({ suffix }))
     } catch (err) {
       setExportError(buildExportErrorDialog(err, keepUpdated ? 'live' : 'manual'))
     }
@@ -441,7 +444,7 @@ export function ExportButton({ data, allData }: ExportButtonProps) {
       {!liveHandle && (
         <button
           onClick={handleExport}
-          disabled={data.length === 0}
+          disabled={allData.length === 0}
           className="flex items-center gap-1.5 bg-surface-2 border border-border rounded px-2.5 py-1 text-xs text-text-secondary hover:text-text-primary hover:border-border-light transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
         >
           <Download size={13} />
@@ -561,7 +564,7 @@ export function ExportButton({ data, allData }: ExportButtonProps) {
                 ))}
               </ul>
               <p className="text-xs text-text-secondary mb-4">
-                Export filtered data ({data.length} rows) or all data ({allData.length} rows)?
+                Export filtered data ({currentData.length} rows) or all data ({allData.length} rows)?
               </p>
             </>
           )}
@@ -596,7 +599,7 @@ export function ExportButton({ data, allData }: ExportButtonProps) {
             >
               Cancel
             </button>
-            {activeFilters.length > 0 && (
+            {activeFilters.length > 0 && currentData.length > 0 && (
               <button
                 onClick={() => void exportFiltered()}
                 className={dialogSecondaryClass}

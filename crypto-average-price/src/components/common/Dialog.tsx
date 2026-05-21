@@ -1,4 +1,5 @@
 import type { ReactNode, PropsWithChildren } from 'react'
+import { createPortal } from 'react-dom'
 
 /** Cancel/dismiss button style for dialog footers. */
 export const dialogCancelClass = 'px-3 py-1.5 text-xs text-text-muted hover:text-text-primary transition-colors'
@@ -29,7 +30,6 @@ interface DialogProps {
  */
 export function Dialog({
   open,
-  onClose,
   title,
   children,
   maxWidth = 'max-w-sm',
@@ -38,8 +38,8 @@ export function Dialog({
 }: DialogProps) {
   if (!open) return null
 
-  return (
-    <div className={`fixed inset-0 ${zIndex} flex items-center justify-center bg-black/60`} onClick={onClose}>
+  return createPortal(
+    <div className={`fixed inset-0 ${zIndex} flex items-center justify-center bg-black/60`}>
       <div
         className={`bg-surface-1 border border-border rounded-lg shadow-xl ${maxWidth} w-full mx-4 p-5 ${className}`}
         onClick={e => e.stopPropagation()}
@@ -50,7 +50,8 @@ export function Dialog({
         {title && <h3 className="text-sm font-semibold text-text-primary mb-3">{title}</h3>}
         {children}
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }
 
