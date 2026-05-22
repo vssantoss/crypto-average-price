@@ -16,6 +16,7 @@ interface ImportTransactionsResult {
   importedCount: number
   duplicateCount: number
   cancelled: boolean
+  error?: string
 }
 
 export type DuplicateImportDecision = 'cancel' | 'skip' | 'include'
@@ -276,8 +277,9 @@ export const useAppStore = create<AppState>()((set, get) => ({
       persist(get())
       return { importedCount: rowsToImport.length, duplicateCount, cancelled: false }
     } catch (err) {
-      set({ isLoading: false, error: (err as Error).message })
-      return { importedCount: 0, duplicateCount: 0, cancelled: false }
+      const error = (err as Error).message
+      set({ isLoading: false, error })
+      return { importedCount: 0, duplicateCount: 0, cancelled: false, error }
     }
   },
 

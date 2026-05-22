@@ -273,6 +273,7 @@ function App() {
             onImportTransactions={() => txRef.current?.click()}
             onImportBackup={() => backupRef.current?.click()}
             isLoading={isLoading}
+            error={error}
           />
         )}
         {isLoading && hasData && (

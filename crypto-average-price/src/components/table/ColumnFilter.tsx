@@ -234,6 +234,11 @@ function MultiSelectFilter<T>({
     const hasStaleValues = nextSelected.length !== currentValues.length
 
     if (!hasStaleValues) return
+    // When data changes remove every selected option, keep the table visible by falling back to All.
+    if (currentValues.length > 0 && nextSelected.length === 0) {
+      column.setFilterValue(undefined)
+      return
+    }
     commitFilter(nextSelected, textValue)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [column, filterValue, uniqueValues])
@@ -249,12 +254,16 @@ function MultiSelectFilter<T>({
 
   const selectedSet = useMemo(() => new Set(selectedValues), [selectedValues])
   const allSelected = uniqueValues.length > 0 && selectedValues.length === uniqueValues.length
+  const noneSelected = selectedValues.length === 0
   const baseLabel = allSelected
     ? 'All'
-    : selectedValues.length === 0
+    : noneSelected
       ? 'None'
       : `${selectedValues.length} selected`
   const label = textValue.trim() ? `${baseLabel} + date` : baseLabel
+  const filterButtonClass = noneSelected
+    ? 'w-full bg-danger/20 border border-danger/60 rounded px-1.5 py-0.5 text-left text-xs text-danger outline-none hover:border-danger focus:border-danger'
+    : 'w-full bg-surface-2 border border-border rounded px-1.5 py-0.5 text-left text-xs text-text-secondary outline-none hover:border-border-light focus:border-accent/50'
 
   /**
    * Commits selected filter values, clearing the filter when all values are selected.
@@ -277,7 +286,7 @@ function MultiSelectFilter<T>({
 
     column.setFilterValue({
       ...(allSelectedNext ? {} : { values: nextSelected }),
-      ...(trimmedText ? { text: trimmedText } : {}),
+      ...(trimmedText ? { text: nextText } : {}),
     })
   }
 
@@ -319,7 +328,7 @@ function MultiSelectFilter<T>({
       <button
         type="button"
         onClick={() => setOpen(current => !current)}
-        className="w-full bg-surface-2 border border-border rounded px-1.5 py-0.5 text-left text-xs text-text-secondary outline-none hover:border-border-light focus:border-accent/50"
+        className={filterButtonClass}
       >
         {label}
       </button>

@@ -75,19 +75,12 @@ function getBalanceBefore(rows: CryptoComRow[], runningBalances: number[], index
 }
 
 /**
- * Gets the balance to use when deriving an average price after a row.
- * @param row - Transaction row to inspect
+ * Gets the running balance to use when deriving an average price after a row.
  * @param runningBalance - Raw running balance after the row
- * @param tradeLinkIndex - Fee-aware trade link index
- * @returns Running balance adjusted for a same-instrument fee folded into the row
+ * @returns Raw running balance after the row
  */
-function getCostBasisBalanceAfter(
-  row: CryptoComRow,
-  runningBalance: number,
-  tradeLinkIndex: TradeLinkIndex,
-): number {
-  if (row.journalType !== JournalType.TRADING) return runningBalance
-  return runningBalance - getLinkedTradeFeeQuantity(row, tradeLinkIndex)
+function getCostBasisBalanceAfter(runningBalance: number): number {
+  return runningBalance
 }
 
 /**
@@ -229,7 +222,7 @@ function reverseStep(
   if (isFoldedTradeFeeRow(row, tradeLinkIndex)) return investedAfter
 
   const balanceBefore = getBalanceBefore(rows, runningBalances, rowIndex)
-  const balanceAfter = getCostBasisBalanceAfter(row, runningBalances[rowIndex], tradeLinkIndex)
+  const balanceAfter = getCostBasisBalanceAfter(runningBalances[rowIndex])
   const feeQuantity = getLinkedTradeFeeQuantity(row, tradeLinkIndex)
   const absQty = getCostBasisQuantity(row, tradeLinkIndex)
 
@@ -287,7 +280,7 @@ function calculateAveragePricesFromCosts(
 
   return rows.map((row, i) => {
     const balanceBefore = getBalanceBefore(rows, runningBalances, i)
-    const balanceAfter = getCostBasisBalanceAfter(row, runningBalances[i], tradeLinkIndex)
+    const balanceAfter = getCostBasisBalanceAfter(runningBalances[i])
     const investedBefore = invested
     const cost = options.getAcquisitionCost(row, buildCostContext(i, rows, runningBalances, tradeIndex, tradeLinkIndex))
 
@@ -347,7 +340,7 @@ export function calculateAveragePrices(
 
   const firstIdx = seedIndices[0]
   const firstSeed = getSeed(rows[firstIdx], options)!
-  const firstBalanceAfter = getCostBasisBalanceAfter(rows[firstIdx], runningBalances[firstIdx], tradeLinkIndex)
+  const firstBalanceAfter = getCostBasisBalanceAfter(runningBalances[firstIdx])
   let invested: number | null = firstSeed * firstBalanceAfter
   results[firstIdx] = makeResult(
     invested,
@@ -364,14 +357,14 @@ export function calculateAveragePrices(
       invested,
       null,
       getBalanceBefore(rows, runningBalances, i),
-      getCostBasisBalanceAfter(rows[i], runningBalances[i], tradeLinkIndex),
+      getCostBasisBalanceAfter(runningBalances[i]),
     )
   }
 
   for (let seg = 0; seg < seedIndices.length; seg++) {
     const idx = seedIndices[seg]
     const seed = getSeed(rows[idx], options)!
-    const balanceAfter = getCostBasisBalanceAfter(rows[idx], runningBalances[idx], tradeLinkIndex)
+    const balanceAfter = getCostBasisBalanceAfter(runningBalances[idx])
     let investedAfterSeed: number = seed * balanceAfter
     results[idx] = makeResult(
       investedAfterSeed,
@@ -388,7 +381,7 @@ export function calculateAveragePrices(
         investedAfterSeed,
         investedBefore,
         getBalanceBefore(rows, runningBalances, i),
-        getCostBasisBalanceAfter(rows[i], runningBalances[i], tradeLinkIndex),
+        getCostBasisBalanceAfter(runningBalances[i]),
       )
     }
   }
