@@ -1,16 +1,36 @@
 import type { CryptoComRow } from '../types/transaction'
 import { JournalType } from '../types/transaction'
-import type { PtaxMap } from '../types/ptax'
 import type { TradeLinkIndex, TradeMatchIndex } from './tradeMatching'
-import { findLinkedTradingPair, getLinkedTradeFeeQuantity, getNetTransactionQuantity, isFoldedTradeFeeRow } from './tradeMatching'
-import { lookupPtaxRate } from './ptaxLookup'
-import { isMergedUsdInternalTrade, isUsdInstrument } from './usdMerge'
+import { getLinkedTradeFeeQuantity, getNetTransactionQuantity, isFoldedTradeFeeRow } from './tradeMatching'
+import { isMergedUsdInternalTrade } from './usdMerge'
 
 export interface AvgPriceResult {
   avgPrice: number | null
-  brlInvested: number | null
+  invested: number | null
+  avgPriceBefore: number | null
+  investedBefore: number | null
 }
 
+export interface AveragePriceContext {
+  rowIndex: number
+  rows: CryptoComRow[]
+  runningBalances: number[]
+  tradeIndex: TradeMatchIndex
+  tradeLinkIndex: TradeLinkIndex
+  balanceBefore: number
+}
+
+export interface AveragePriceOptions {
+  seedField: 'avgPriceSeed' | 'usdAvgPriceSeed'
+  getAcquisitionCost: (row: CryptoComRow, context: AveragePriceContext) => number | null
+  keepInternalUsdCost?: boolean
+}
+
+/**
+ * Checks whether a journal type removes holdings.
+ * @param type - Journal type to inspect
+ * @returns True when the row should remove proportional cost basis
+ */
 function isDisposition(type: JournalType): boolean {
   return (
     type === JournalType.OFFCHAIN_WITHDRAWAL ||
@@ -31,9 +51,9 @@ function getCostBasisQuantity(row: CryptoComRow, tradeLinkIndex: TradeLinkIndex)
 }
 
 /**
- * Checks whether a row increases holdings and needs a BRL cost basis.
+ * Checks whether a row increases holdings and needs a known acquisition cost.
  * @param row - Transaction row to inspect
- * @returns True if the row should add BRL invested value when cost is known
+ * @returns True if the row should add invested value when cost is known
  */
 function isCostedAcquisition(row: CryptoComRow): boolean {
   return (
@@ -44,206 +64,238 @@ function isCostedAcquisition(row: CryptoComRow): boolean {
 }
 
 /**
- * Gets the BRL cost for a trading BUY row.
- * Stablecoin buys linked to non-USD sells use PTAX net acquisition cost.
- * @param row - Trading BUY row
- * @param ptaxMap - PTAX date-to-rate map
- * @param tradeLinkIndex - Fee-aware trade link index
- * @returns Manual or linked stablecoin BRL cost, or null when no value exists
+ * Gets the running balance before a row.
+ * @param rows - Instrument rows being processed
+ * @param runningBalances - Raw running balances after each row
+ * @param index - Row index to inspect
+ * @returns Balance before the indexed row
  */
-function getTradingBuyBrlCost(
-  row: CryptoComRow,
-  ptaxMap: PtaxMap,
-  tradeLinkIndex: TradeLinkIndex,
-): number | null {
-  if (row.userBrlCost !== undefined) return row.userBrlCost
-
-  if (!isUsdInstrument(row.instrument)) return null
-
-  const paired = findLinkedTradingPair(row, tradeLinkIndex)
-  if (!paired || paired.side !== 'SELL' || isUsdInstrument(paired.instrument)) return null
-
-  const ptaxRate = lookupPtaxRate(row.eventDate, ptaxMap)
-  if (ptaxRate === null) return null
-
-  return getCostBasisQuantity(row, tradeLinkIndex) * ptaxRate
+function getBalanceBefore(rows: CryptoComRow[], runningBalances: number[], index: number): number {
+  return index > 0 ? runningBalances[index - 1] : runningBalances[0] - rows[0].transactionQuantity
 }
 
 /**
- * Gets the BRL cost for a row, reading userBrlCost from the row itself.
- * @param row - Transaction row
- * @param ptaxMap - PTAX date-to-rate map
+ * Gets the balance to use when deriving an average price after a row.
+ * @param row - Transaction row to inspect
+ * @param runningBalance - Raw running balance after the row
  * @param tradeLinkIndex - Fee-aware trade link index
- * @returns BRL cost, or null when no value exists
+ * @returns Running balance adjusted for a same-instrument fee folded into the row
  */
-function getRowCost(
+function getCostBasisBalanceAfter(
   row: CryptoComRow,
-  ptaxMap: PtaxMap,
+  runningBalance: number,
   tradeLinkIndex: TradeLinkIndex,
-): number | null {
-  if (row.journalType === JournalType.TRADING && row.side === 'BUY') {
-    return getTradingBuyBrlCost(row, ptaxMap, tradeLinkIndex)
-  }
-
-  if (
-    row.journalType === JournalType.OFFCHAIN_DEPOSIT ||
-    row.journalType === JournalType.ONCHAIN_DEPOSIT
-  ) {
-    if (row.userBrlCost !== undefined) return row.userBrlCost
-    return null
-  }
-
-  return null
+): number {
+  if (row.journalType !== JournalType.TRADING) return runningBalance
+  return runningBalance - getLinkedTradeFeeQuantity(row, tradeLinkIndex)
 }
 
 /**
- * Forward step: compute brlInvested after row i, given brlInvested before row i.
- * @param row - Transaction row being applied
- * @param brlBefore - BRL invested before the row
- * @param balBefore - Instrument balance before the row
+ * Builds the callback context for a row cost lookup.
+ * @param rowIndex - Row index being processed
+ * @param rows - Instrument rows being processed
+ * @param runningBalances - Raw running balances after each row
  * @param tradeIndex - Trade match index built from original rows
- * @param ptaxMap - PTAX date-to-rate map
  * @param tradeLinkIndex - Fee-aware trade link index
- * @param rows - Normalized rows for this instrument
- * @returns BRL invested after applying the row
+ * @returns Context object for cost provider callbacks
+ */
+function buildCostContext(
+  rowIndex: number,
+  rows: CryptoComRow[],
+  runningBalances: number[],
+  tradeIndex: TradeMatchIndex,
+  tradeLinkIndex: TradeLinkIndex,
+): AveragePriceContext {
+  return {
+    rowIndex,
+    rows,
+    runningBalances,
+    tradeIndex,
+    tradeLinkIndex,
+    balanceBefore: getBalanceBefore(rows, runningBalances, rowIndex),
+  }
+}
+
+/**
+ * Reads the configured average-price seed from a row.
+ * @param row - Transaction row to inspect
+ * @param options - Average price options with the seed field name
+ * @returns Seed value, or undefined when no seed exists
+ */
+function getSeed(row: CryptoComRow, options: AveragePriceOptions): number | undefined {
+  return row[options.seedField]
+}
+
+/**
+ * Builds a result object from before/after cost-basis state.
+ * @param invested - Invested amount after the row
+ * @param investedBefore - Invested amount before the row
+ * @param balanceBefore - Balance before the row
+ * @param balanceAfter - Cost-basis balance after the row
+ * @returns Average price result for one row
+ */
+function makeResult(
+  invested: number | null,
+  investedBefore: number | null,
+  balanceBefore: number,
+  balanceAfter: number,
+): AvgPriceResult {
+  const avgPrice = invested !== null && balanceAfter > 0 ? invested / balanceAfter : null
+  const avgPriceBefore = investedBefore !== null && balanceBefore > 0 ? investedBefore / balanceBefore : null
+  return {
+    avgPrice,
+    invested,
+    avgPriceBefore,
+    investedBefore,
+  }
+}
+
+/**
+ * Computes the invested value after applying one row.
+ * @param row - Transaction row being applied
+ * @param rowIndex - Index of the row being applied
+ * @param investedBefore - Invested value before the row
+ * @param rows - Instrument rows being processed
+ * @param runningBalances - Raw running balances after each row
+ * @param tradeIndex - Trade match index built from original rows
+ * @param tradeLinkIndex - Fee-aware trade link index
+ * @param options - Currency-specific average price options
+ * @returns Invested value after applying the row
  */
 function forwardStep(
   row: CryptoComRow,
-  brlBefore: number,
-  balBefore: number,
-  tradeIndex: TradeMatchIndex,
-  ptaxMap: PtaxMap,
-  tradeLinkIndex: TradeLinkIndex,
+  rowIndex: number,
+  investedBefore: number,
   rows: CryptoComRow[],
+  runningBalances: number[],
+  tradeIndex: TradeMatchIndex,
+  tradeLinkIndex: TradeLinkIndex,
+  options: AveragePriceOptions,
 ): number {
-  if (isFoldedTradeFeeRow(row, tradeLinkIndex)) return brlBefore
+  if (isFoldedTradeFeeRow(row, tradeLinkIndex)) return investedBefore
 
+  const balanceBefore = getBalanceBefore(rows, runningBalances, rowIndex)
   const absQty = getCostBasisQuantity(row, tradeLinkIndex)
-  const avgBefore = balBefore > 0 ? brlBefore / balBefore : null
+  const avgBefore = balanceBefore > 0 ? investedBefore / balanceBefore : null
 
   if (row.journalType === JournalType.TRADING) {
     if (row.side === 'BUY') {
-      if (isMergedUsdInternalTrade(row, tradeIndex, rows)) {
-        return avgBefore !== null ? brlBefore + avgBefore * absQty : brlBefore
+      if (!options.keepInternalUsdCost && isMergedUsdInternalTrade(row, tradeIndex, rows)) {
+        return avgBefore !== null ? investedBefore + avgBefore * absQty : investedBefore
       }
 
-      const cost = getRowCost(row, ptaxMap, tradeLinkIndex)
-      return cost !== null ? brlBefore + cost : brlBefore
+      const cost = options.getAcquisitionCost(row, buildCostContext(rowIndex, rows, runningBalances, tradeIndex, tradeLinkIndex))
+      return cost !== null ? investedBefore + cost : investedBefore
     } else if (row.side === 'SELL') {
-      return avgBefore !== null ? brlBefore - avgBefore * absQty : brlBefore
+      return avgBefore !== null ? investedBefore - avgBefore * absQty : investedBefore
     }
   } else if (
     row.journalType === JournalType.OFFCHAIN_DEPOSIT ||
     row.journalType === JournalType.ONCHAIN_DEPOSIT
   ) {
-    const cost = getRowCost(row, ptaxMap, tradeLinkIndex)
-    return cost !== null ? brlBefore + cost : brlBefore
+    const cost = options.getAcquisitionCost(row, buildCostContext(rowIndex, rows, runningBalances, tradeIndex, tradeLinkIndex))
+    return cost !== null ? investedBefore + cost : investedBefore
   } else if (row.journalType === JournalType.SOFT_STAKE_REWARD) {
-    return brlBefore
+    return investedBefore
   } else if (isDisposition(row.journalType)) {
-    return avgBefore !== null ? brlBefore - avgBefore * absQty : brlBefore
+    return avgBefore !== null ? investedBefore - avgBefore * absQty : investedBefore
   }
 
-  return brlBefore
+  return investedBefore
 }
 
 /**
- * Reverse step: compute brlInvested before a row, given brlInvested after it.
+ * Computes the invested value before a row when walking backward from an anchor.
  * @param row - Transaction row being reversed
- * @param brlAfter - BRL invested after the row
- * @param balBefore - Instrument balance before the row
- * @param balAfter - Instrument balance after the row
+ * @param rowIndex - Index of the row being reversed
+ * @param investedAfter - Invested value after the row
+ * @param rows - Instrument rows being processed
+ * @param runningBalances - Raw running balances after each row
  * @param tradeIndex - Trade match index built from original rows
- * @param ptaxMap - PTAX date-to-rate map
  * @param tradeLinkIndex - Fee-aware trade link index
- * @param rows - Normalized rows for this instrument
- * @returns BRL invested before the row, or null when it cannot be derived
+ * @param options - Currency-specific average price options
+ * @returns Invested value before the row, or null when it cannot be derived
  */
 function reverseStep(
   row: CryptoComRow,
-  brlAfter: number,
-  balBefore: number,
-  balAfter: number,
-  tradeIndex: TradeMatchIndex,
-  ptaxMap: PtaxMap,
-  tradeLinkIndex: TradeLinkIndex,
+  rowIndex: number,
+  investedAfter: number,
   rows: CryptoComRow[],
+  runningBalances: number[],
+  tradeIndex: TradeMatchIndex,
+  tradeLinkIndex: TradeLinkIndex,
+  options: AveragePriceOptions,
 ): number | null {
-  if (isFoldedTradeFeeRow(row, tradeLinkIndex)) return brlAfter
+  if (isFoldedTradeFeeRow(row, tradeLinkIndex)) return investedAfter
 
+  const balanceBefore = getBalanceBefore(rows, runningBalances, rowIndex)
+  const balanceAfter = getCostBasisBalanceAfter(row, runningBalances[rowIndex], tradeLinkIndex)
   const feeQuantity = getLinkedTradeFeeQuantity(row, tradeLinkIndex)
   const absQty = getCostBasisQuantity(row, tradeLinkIndex)
 
   if (row.journalType === JournalType.TRADING) {
     if (row.side === 'BUY') {
-      if (isMergedUsdInternalTrade(row, tradeIndex, rows)) {
-        if (balAfter === 0) return null
-        return brlAfter * balBefore / balAfter
+      if (!options.keepInternalUsdCost && isMergedUsdInternalTrade(row, tradeIndex, rows)) {
+        if (balanceAfter === 0) return null
+        return investedAfter * balanceBefore / balanceAfter
       }
 
-      const cost = getRowCost(row, ptaxMap, tradeLinkIndex)
-      return cost !== null ? brlAfter - cost : brlAfter
+      const cost = options.getAcquisitionCost(row, buildCostContext(rowIndex, rows, runningBalances, tradeIndex, tradeLinkIndex))
+      return cost !== null ? investedAfter - cost : investedAfter
     } else if (row.side === 'SELL') {
       if (feeQuantity > 0) {
-        const balanceAfterNetDisposition = balBefore - absQty
+        const balanceAfterNetDisposition = balanceBefore - absQty
         if (balanceAfterNetDisposition === 0) return null
-        return brlAfter * balBefore / balanceAfterNetDisposition
+        return investedAfter * balanceBefore / balanceAfterNetDisposition
       }
-      if (balAfter === 0) return null
-      return brlAfter * balBefore / balAfter
+      if (balanceAfter === 0) return null
+      return investedAfter * balanceBefore / balanceAfter
     }
   } else if (
     row.journalType === JournalType.OFFCHAIN_DEPOSIT ||
     row.journalType === JournalType.ONCHAIN_DEPOSIT
   ) {
-    const cost = getRowCost(row, ptaxMap, tradeLinkIndex)
-    return cost !== null ? brlAfter - cost : brlAfter
+    const cost = options.getAcquisitionCost(row, buildCostContext(rowIndex, rows, runningBalances, tradeIndex, tradeLinkIndex))
+    return cost !== null ? investedAfter - cost : investedAfter
   } else if (row.journalType === JournalType.SOFT_STAKE_REWARD) {
-    return brlAfter
+    return investedAfter
   } else if (isDisposition(row.journalType)) {
-    if (balAfter === 0) return null
-    return brlAfter * balBefore / balAfter
+    if (balanceAfter === 0) return null
+    return investedAfter * balanceBefore / balanceAfter
   }
 
-  return brlAfter
+  return investedAfter
 }
 
 /**
  * Calculates average prices forward from available transaction costs.
  * @param rows - Transaction rows for one instrument
- * @param runningBalances - Running balance after each row
- * @param ptaxMap - PTAX date-to-rate map
+ * @param runningBalances - Raw running balances after each row
  * @param tradeIndex - Trade match index built from original rows
  * @param tradeLinkIndex - Fee-aware trade link index
+ * @param options - Currency-specific average price options
  * @returns Average price results derived from known acquisition costs
  */
 function calculateAveragePricesFromCosts(
   rows: CryptoComRow[],
   runningBalances: number[],
-  ptaxMap: PtaxMap,
   tradeIndex: TradeMatchIndex,
   tradeLinkIndex: TradeLinkIndex,
+  options: AveragePriceOptions,
 ): AvgPriceResult[] {
-  let brlInv: number | null = 0
-
-  function balBefore(i: number): number {
-    return i > 0 ? runningBalances[i - 1] : runningBalances[0] - rows[0].transactionQuantity
-  }
-
-  function makeResult(brl: number | null, i: number): AvgPriceResult {
-    const avg = brl !== null && runningBalances[i] > 0 ? brl / runningBalances[i] : null
-    return { avgPrice: avg, brlInvested: brl }
-  }
+  let invested: number | null = 0
 
   return rows.map((row, i) => {
-    const cost = getRowCost(row, ptaxMap, tradeLinkIndex)
-    const beforeBalance = balBefore(i)
+    const balanceBefore = getBalanceBefore(rows, runningBalances, i)
+    const balanceAfter = getCostBasisBalanceAfter(row, runningBalances[i], tradeLinkIndex)
+    const investedBefore = invested
+    const cost = options.getAcquisitionCost(row, buildCostContext(i, rows, runningBalances, tradeIndex, tradeLinkIndex))
 
-    if (brlInv === null) {
-      if (beforeBalance <= 0 && isCostedAcquisition(row) && cost !== null) {
-        brlInv = forwardStep(row, 0, beforeBalance, tradeIndex, ptaxMap, tradeLinkIndex, rows)
+    if (invested === null) {
+      if (balanceBefore <= 0 && isCostedAcquisition(row) && cost !== null) {
+        invested = forwardStep(row, i, 0, rows, runningBalances, tradeIndex, tradeLinkIndex, options)
       }
-      return makeResult(brlInv, i)
+      return makeResult(invested, investedBefore, balanceBefore, balanceAfter)
     }
 
     if (
@@ -251,32 +303,31 @@ function calculateAveragePricesFromCosts(
       cost === null &&
       !isMergedUsdInternalTrade(row, tradeIndex, rows)
     ) {
-      brlInv = null
-      return makeResult(brlInv, i)
+      invested = null
+      return makeResult(invested, investedBefore, balanceBefore, balanceAfter)
     }
 
-    brlInv = forwardStep(row, brlInv, beforeBalance, tradeIndex, ptaxMap, tradeLinkIndex, rows)
-    return makeResult(brlInv, i)
+    invested = forwardStep(row, i, invested, rows, runningBalances, tradeIndex, tradeLinkIndex, options)
+    return makeResult(invested, investedBefore, balanceBefore, balanceAfter)
   })
 }
 
 /**
  * Calculates average prices using anchor-point seeds that propagate both directions.
- * Seeds are read directly from each row's avgPriceSeed field.
  * If no seed exists, known transaction costs are used as the cost basis.
  * @param rows - Transaction rows for one instrument
- * @param runningBalances - Running balance after each row
- * @param ptaxMap - PTAX date-to-rate map
+ * @param runningBalances - Raw running balances after each row
  * @param tradeIndex - Trade match index built from original rows
  * @param tradeLinkIndex - Fee-aware trade link index
- * @returns Average price and BRL invested after each row
+ * @param options - Currency-specific average price options
+ * @returns Average price and invested value after each row
  */
 export function calculateAveragePrices(
   rows: CryptoComRow[],
   runningBalances: number[],
-  ptaxMap: PtaxMap,
   tradeIndex: TradeMatchIndex,
   tradeLinkIndex: TradeLinkIndex,
+  options: AveragePriceOptions,
 ): AvgPriceResult[] {
   const n = rows.length
   if (n === 0) return []
@@ -285,57 +336,60 @@ export function calculateAveragePrices(
 
   const seedIndices: number[] = []
   for (let i = 0; i < n; i++) {
-    if (rows[i].avgPriceSeed !== undefined) {
+    if (getSeed(rows[i], options) !== undefined) {
       seedIndices.push(i)
     }
   }
 
   if (seedIndices.length === 0) {
-    return calculateAveragePricesFromCosts(rows, runningBalances, ptaxMap, tradeIndex, tradeLinkIndex)
+    return calculateAveragePricesFromCosts(rows, runningBalances, tradeIndex, tradeLinkIndex, options)
   }
 
-  function balBefore(i: number): number {
-    return i > 0 ? runningBalances[i - 1] : runningBalances[0] - rows[0].transactionQuantity
-  }
-
-  function makeResult(brl: number | null, i: number): AvgPriceResult {
-    const avg = brl !== null && runningBalances[i] > 0 ? brl / runningBalances[i] : null
-    return { avgPrice: avg, brlInvested: brl }
-  }
-
-  // Back-calculate from first seed to start
   const firstIdx = seedIndices[0]
-  const firstSeed = rows[firstIdx].avgPriceSeed!
-  let brl: number | null = firstSeed * runningBalances[firstIdx]
-  results[firstIdx] = makeResult(brl, firstIdx)
+  const firstSeed = getSeed(rows[firstIdx], options)!
+  const firstBalanceAfter = getCostBasisBalanceAfter(rows[firstIdx], runningBalances[firstIdx], tradeLinkIndex)
+  let invested: number | null = firstSeed * firstBalanceAfter
+  results[firstIdx] = makeResult(
+    invested,
+    null,
+    getBalanceBefore(rows, runningBalances, firstIdx),
+    firstBalanceAfter,
+  )
 
   for (let i = firstIdx - 1; i >= 0; i--) {
-    if (brl !== null) {
-      brl = reverseStep(
-        rows[i + 1],
-        brl,
-        balBefore(i + 1),
-        runningBalances[i + 1],
-        tradeIndex,
-        ptaxMap,
-        tradeLinkIndex,
-        rows,
-      )
+    if (invested !== null) {
+      invested = reverseStep(rows[i + 1], i + 1, invested, rows, runningBalances, tradeIndex, tradeLinkIndex, options)
     }
-    results[i] = makeResult(brl, i)
+    results[i] = makeResult(
+      invested,
+      null,
+      getBalanceBefore(rows, runningBalances, i),
+      getCostBasisBalanceAfter(rows[i], runningBalances[i], tradeLinkIndex),
+    )
   }
 
-  // Forward-calculate from each seed to next seed (or end)
   for (let seg = 0; seg < seedIndices.length; seg++) {
     const idx = seedIndices[seg]
-    const seed = rows[idx].avgPriceSeed!
-    let brlInv: number = seed * runningBalances[idx]
-    results[idx] = makeResult(brlInv, idx)
+    const seed = getSeed(rows[idx], options)!
+    const balanceAfter = getCostBasisBalanceAfter(rows[idx], runningBalances[idx], tradeLinkIndex)
+    let investedAfterSeed: number = seed * balanceAfter
+    results[idx] = makeResult(
+      investedAfterSeed,
+      null,
+      getBalanceBefore(rows, runningBalances, idx),
+      balanceAfter,
+    )
 
     const segEnd = seg < seedIndices.length - 1 ? seedIndices[seg + 1] : n
     for (let i = idx + 1; i < segEnd; i++) {
-      brlInv = forwardStep(rows[i], brlInv, balBefore(i), tradeIndex, ptaxMap, tradeLinkIndex, rows)
-      results[i] = makeResult(brlInv, i)
+      const investedBefore = investedAfterSeed
+      investedAfterSeed = forwardStep(rows[i], i, investedAfterSeed, rows, runningBalances, tradeIndex, tradeLinkIndex, options)
+      results[i] = makeResult(
+        investedAfterSeed,
+        investedBefore,
+        getBalanceBefore(rows, runningBalances, i),
+        getCostBasisBalanceAfter(rows[i], runningBalances[i], tradeLinkIndex),
+      )
     }
   }
 

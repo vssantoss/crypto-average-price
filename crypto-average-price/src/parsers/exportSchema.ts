@@ -29,12 +29,18 @@ export const EXPORT_CSV_COLUMNS = {
   RUNNING_BALANCE: 'Running Balance',
   PTAX_RATE: 'PTAX Rate',
   BRL_RUNNING_BALANCE: 'BRL Running Balance',
+  USD_RUNNING_BALANCE: 'USD Balance',
+  USD_TRANSACTION_COST: 'USD Tx Cost',
+  USD_AVG_PRICE: 'USD Avg Price',
+  BRL_COST_RATE: 'BRL Cost Rate',
   BRL_TRANSACTION_COST: 'BRL Transaction Cost',
   BRL_AVG_PRICE: 'BRL Avg Price',
   BRL_PROFIT_LOSS: 'BRL Profit/Loss',
   INFO: 'Info',
   AVG_PRICE_SEED: '_AvgPriceSeed',
+  USD_AVG_PRICE_SEED: '_UsdAvgPriceSeed',
   USER_BRL_COST: '_UserBrlCost',
+  USER_USD_COST: '_UserUsdCost',
   BALANCE_OVERRIDE: '_BalanceOverride',
 } as const
 
@@ -83,12 +89,18 @@ export function buildExportCsvRow(row: ProcessedRow, raw?: CryptoComRow, options
     ...(calc && { [C.RUNNING_BALANCE]: getCalculatedExportValue(row, row.runningBalance) }),
     [C.PTAX_RATE]: getCalculatedExportValue(row, row.cambioBC),
     ...(calc && { [C.BRL_RUNNING_BALANCE]: getCalculatedExportValue(row, row.brlRunningBalance) }),
+    ...(calc && { [C.USD_RUNNING_BALANCE]: getCalculatedExportValue(row, row.usdRunningBalance) }),
+    ...(calc && { [C.USD_TRANSACTION_COST]: getCalculatedExportValue(row, row.usdTransactionCost) }),
+    ...(calc && { [C.USD_AVG_PRICE]: getCalculatedExportValue(row, row.usdAveragePrice) }),
+    ...(calc && { [C.BRL_COST_RATE]: getCalculatedExportValue(row, row.brlCostRate) }),
     ...(calc && { [C.BRL_TRANSACTION_COST]: getCalculatedExportValue(row, row.brlTransactionCost) }),
     ...(calc && { [C.BRL_AVG_PRICE]: getCalculatedExportValue(row, row.precoMedioCompra) }),
     ...(calc && { [C.BRL_PROFIT_LOSS]: getCalculatedExportValue(row, row.totalLucroPrejuizo) }),
     [C.INFO]: row.info,
     [C.AVG_PRICE_SEED]: raw?.avgPriceSeed ?? '',
+    [C.USD_AVG_PRICE_SEED]: raw?.usdAvgPriceSeed ?? '',
     [C.USER_BRL_COST]: raw?.userBrlCost ?? '',
+    [C.USER_USD_COST]: raw?.userUsdCost ?? '',
     [C.BALANCE_OVERRIDE]: raw?.balanceOverride ?? '',
     [C.JOURNAL_ID]: raw?.journalId ?? '',
     [C.ORDER_ID]: raw?.orderId ?? '',
@@ -152,9 +164,22 @@ export function parseExportedCsvRow(rawRow: Record<string, string>): {
     if (avgSeedVal > 0) transaction.avgPriceSeed = avgSeedVal
   }
 
+  const usdAvgSeedStr = rawRow[C.USD_AVG_PRICE_SEED] || ''
+  if (usdAvgSeedStr.trim() !== '') {
+    const usdAvgSeedVal = usdAvgSeedStr === 'true'
+      ? cleanCsvNumber(rawRow[C.USD_AVG_PRICE] || '')
+      : cleanCsvNumber(usdAvgSeedStr)
+    if (usdAvgSeedVal > 0) transaction.usdAvgPriceSeed = usdAvgSeedVal
+  }
+
   const brlCostStr = rawRow[C.USER_BRL_COST] || ''
   if (brlCostStr.trim() !== '') {
     transaction.userBrlCost = cleanCsvNumber(brlCostStr)
+  }
+
+  const usdCostStr = rawRow[C.USER_USD_COST] || ''
+  if (usdCostStr.trim() !== '') {
+    transaction.userUsdCost = cleanCsvNumber(usdCostStr)
   }
 
   const balOverride = rawRow[C.BALANCE_OVERRIDE] || ''

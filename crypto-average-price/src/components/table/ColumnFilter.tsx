@@ -301,17 +301,17 @@ function MultiSelectFilter<T>({
   }
 
   /**
-   * Selects every available filter value and clears the active filter.
+   * Selects every available filter value and clears free-form text.
    */
   function selectAll(): void {
-    commitFilter(uniqueValues)
+    commitFilter(uniqueValues, '')
   }
 
   /**
-   * Clears every checkbox so the filter matches no values.
+   * Clears every checkbox and clears free-form text.
    */
   function selectNone(): void {
-    commitFilter([])
+    commitFilter([], '')
   }
 
   return (

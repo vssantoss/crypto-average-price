@@ -47,8 +47,12 @@ export interface CryptoComRow {
   sourceFileName?: string
   /** User-provided BRL transaction amount override */
   userBrlCost?: number
+  /** User-provided USD transaction amount override */
+  userUsdCost?: number
   /** User-provided avg price seed */
   avgPriceSeed?: number
+  /** User-provided USD avg price seed */
+  usdAvgPriceSeed?: number
   /** User-provided running balance override */
   balanceOverride?: number
   /** User-provided note */
@@ -79,6 +83,10 @@ export interface ProcessedRow {
   cambioBC: number | null
   brlRunningBalance: number | null
   brlTransactionCost: number | null
+  usdRunningBalance: number | null
+  usdTransactionCost: number | null
+  usdAveragePrice: number | null
+  brlCostRate: number | null
   precoMedioCompra: number | null
   totalLucroPrejuizo: number | null
   info: string
@@ -94,7 +102,9 @@ export interface ProcessedRow {
   hasBalanceOverride: boolean
   isEditable: {
     brlCost: boolean
+    usdCost: boolean
     avgPrice: boolean
+    usdAvgPrice: boolean
     info: boolean
   }
 }

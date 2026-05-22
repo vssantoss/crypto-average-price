@@ -53,8 +53,10 @@ interface AppState {
   importPtax: (files: FileList) => Promise<void>
   importExported: (file: File) => Promise<void>
   setUserBrlCost: (order: number, value: number | null) => void
+  setUserUsdCost: (order: number, value: number | null) => void
   setBalanceOverride: (order: number, value: number | null) => void
   setAvgPriceSeed: (order: number, value: number | null) => void
+  setUsdAvgPriceSeed: (order: number, value: number | null) => void
   addManualRow: (row: CryptoComRow) => void
   updateRow: (order: number, updates: Partial<CryptoComRow>) => void
   deleteRow: (order: number) => void
@@ -322,6 +324,13 @@ export const useAppStore = create<AppState>()((set, get) => ({
     persist(get())
   },
 
+  setUserUsdCost(order: number, value: number | null) {
+    set(state => ({
+      rawTransactions: updateRowField(state.rawTransactions, order, 'userUsdCost', value === null ? undefined : value),
+    }))
+    persist(get())
+  },
+
   setBalanceOverride(order: number, value: number | null) {
     set(state => ({
       rawTransactions: updateRowField(state.rawTransactions, order, 'balanceOverride', value === null ? undefined : value),
@@ -332,6 +341,13 @@ export const useAppStore = create<AppState>()((set, get) => ({
   setAvgPriceSeed(order: number, value: number | null) {
     set(state => ({
       rawTransactions: updateRowField(state.rawTransactions, order, 'avgPriceSeed', value === null ? undefined : value),
+    }))
+    persist(get())
+  },
+
+  setUsdAvgPriceSeed(order: number, value: number | null) {
+    set(state => ({
+      rawTransactions: updateRowField(state.rawTransactions, order, 'usdAvgPriceSeed', value === null ? undefined : value),
     }))
     persist(get())
   },
