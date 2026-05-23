@@ -64,6 +64,21 @@ function isCostedAcquisition(row: CryptoComRow): boolean {
 }
 
 /**
+ * Checks whether a balance override introduces holdings without a currency seed.
+ * @param row - Transaction row to inspect
+ * @param balanceAfter - Running balance after the row
+ * @param options - Average price options with the seed field name
+ * @returns True when the cost basis should be considered unknown
+ */
+function hasUnseededPositiveBalanceAnchor(
+  row: CryptoComRow,
+  balanceAfter: number,
+  options: AveragePriceOptions,
+): boolean {
+  return row.balanceOverride !== undefined && balanceAfter > 0 && getSeed(row, options) === undefined
+}
+
+/**
  * Gets the running balance before a row.
  * @param rows - Instrument rows being processed
  * @param runningBalances - Raw running balances after each row
@@ -284,6 +299,11 @@ function calculateAveragePricesFromCosts(
     const investedBefore = invested
     const cost = options.getAcquisitionCost(row, buildCostContext(i, rows, runningBalances, tradeIndex, tradeLinkIndex))
 
+    if (invested !== null && hasUnseededPositiveBalanceAnchor(row, balanceAfter, options)) {
+      invested = null
+      return makeResult(invested, investedBefore, balanceBefore, balanceAfter)
+    }
+
     if (invested === null) {
       if (balanceBefore <= 0 && isCostedAcquisition(row) && cost !== null) {
         invested = forwardStep(row, i, 0, rows, runningBalances, tradeIndex, tradeLinkIndex, options)
@@ -365,7 +385,7 @@ export function calculateAveragePrices(
     const idx = seedIndices[seg]
     const seed = getSeed(rows[idx], options)!
     const balanceAfter = getCostBasisBalanceAfter(runningBalances[idx])
-    let investedAfterSeed: number = seed * balanceAfter
+    let investedAfterSeed: number | null = seed * balanceAfter
     results[idx] = makeResult(
       investedAfterSeed,
       null,
@@ -376,7 +396,12 @@ export function calculateAveragePrices(
     const segEnd = seg < seedIndices.length - 1 ? seedIndices[seg + 1] : n
     for (let i = idx + 1; i < segEnd; i++) {
       const investedBefore = investedAfterSeed
-      investedAfterSeed = forwardStep(rows[i], i, investedAfterSeed, rows, runningBalances, tradeIndex, tradeLinkIndex, options)
+      if (investedAfterSeed !== null) {
+        const nextBalanceAfter = getCostBasisBalanceAfter(runningBalances[i])
+        investedAfterSeed = hasUnseededPositiveBalanceAnchor(rows[i], nextBalanceAfter, options)
+          ? null
+          : forwardStep(rows[i], i, investedAfterSeed, rows, runningBalances, tradeIndex, tradeLinkIndex, options)
+      }
       results[i] = makeResult(
         investedAfterSeed,
         investedBefore,
