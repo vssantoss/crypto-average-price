@@ -34,10 +34,10 @@ export function ColumnFilter<T>({ column }: ColumnFilterProps<T>) {
   }
 
   if (meta?.filterType !== 'combo') {
-    return <TextFilter column={column} filterValue={filterValue} />
+  return <TextFilter key={filterValue} column={column} filterValue={filterValue} />
   }
 
-  return <ComboFilter column={column} filterValue={filterValue} />
+  return <ComboFilter key={filterValue} column={column} filterValue={filterValue} />
 }
 
 /**

@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useAppStore } from '../../store/useAppStore'
-import { useExchangeList } from '../../store/selectors'
-import { JournalType } from '../../types/transaction'
+import { useExchangeList, useInstrumentList } from '../../store/selectors'
+import { JournalType, Wallet } from '../../types/transaction'
 import type { CryptoComRow, TradeSide } from '../../types/transaction'
 import { parseCryptoComDate } from '../../utils/date'
 import { Dialog, DialogFooter, dialogCancelClass, dialogPrimaryClass } from '../common/Dialog'
@@ -14,6 +14,7 @@ interface AddRowDialogProps {
 }
 
 const journalTypes = Object.values(JournalType)
+const walletOptions = Object.values(Wallet)
 
 /**
  * Returns the current UTC time as a formatted string: MM/DD/YYYY HH:MM:SS.
@@ -107,16 +108,27 @@ function normalizeInstrumentInput(instrument: string): string {
   return trimmed.toUpperCase()
 }
 
+/**
+ * Formats a wallet value for display in the add/edit form.
+ * @param wallet - Wallet value to format
+ * @returns Human-readable wallet label
+ */
+function formatWallet(wallet: Wallet): string {
+  return wallet === Wallet.EXTERNAL ? 'External Wallet' : 'Trading Wallet'
+}
+
 interface AddRowFormState {
   timeUtc: string
   journalType: JournalType
   exchangeName: string
+  wallet: Wallet
   instrument: string
   side: TradeSide
   quantity: string
   cost: string
   takerSide: string
   balanceOverride: string
+  userBrlCost: string
 }
 
 /**
@@ -126,6 +138,24 @@ interface AddRowFormState {
  */
 function isManualUpdate(journalType: JournalType): boolean {
   return journalType === JournalType.MANUAL_UPDATE
+}
+
+/**
+ * Checks whether a journal type is a manual sale from offchain holdings.
+ * @param journalType - Journal type selected in the form
+ * @returns True when the row should consume external balance and use BRL proceeds
+ */
+function isOffchainSale(journalType: JournalType): boolean {
+  return journalType === JournalType.OFFCHAIN_SALE
+}
+
+/**
+ * Checks whether a journal type transfers holdings from Trading Wallet to External Wallet.
+ * @param journalType - Journal type selected in the form
+ * @returns True when the wallet is implied by transfer semantics
+ */
+function isOffchainWithdrawal(journalType: JournalType): boolean {
+  return journalType === JournalType.OFFCHAIN_WITHDRAWAL
 }
 
 /**
@@ -140,12 +170,14 @@ function createInitialFormState(editRow?: CryptoComRow | null): AddRowFormState 
       timeUtc: nowUtcString(),
       journalType: JournalType.TRADING,
       exchangeName: '',
+      wallet: Wallet.TRADING,
       instrument: '',
       side: null,
       quantity: '',
       cost: '',
       takerSide: '',
       balanceOverride: '',
+      userBrlCost: '',
     }
   }
 
@@ -153,12 +185,16 @@ function createInitialFormState(editRow?: CryptoComRow | null): AddRowFormState 
     timeUtc: editRow.timeUtc,
     journalType: editRow.journalType,
     exchangeName: editRow.exchangeName || '',
+    wallet: editRow.wallet ?? Wallet.TRADING,
     instrument: editRow.instrument,
     side: editRow.side,
-    quantity: editRow.transactionQuantity.toString(),
+    quantity: editRow.journalType === JournalType.OFFCHAIN_SALE
+      ? Math.abs(editRow.transactionQuantity).toString()
+      : editRow.transactionQuantity.toString(),
     cost: editRow.transactionCost.toString(),
     takerSide: editRow.takerSide,
     balanceOverride: editRow.balanceOverride?.toString() ?? '',
+    userBrlCost: editRow.userBrlCost?.toString() ?? '',
   }
 }
 
@@ -179,6 +215,11 @@ export function AddRowDialog({ open, onClose, editRow }: AddRowDialogProps) {
   )
 }
 
+/**
+ * Renders the add/edit transaction form and persists its values.
+ * @param props - Dialog state, close callback, and optional row being edited
+ * @returns Add/edit row dialog content
+ */
 function AddRowDialogContent({ open, onClose, editRow }: AddRowDialogProps) {
   const addManualRow = useAppStore(s => s.addManualRow)
   const updateRow = useAppStore(s => s.updateRow)
@@ -188,25 +229,42 @@ function AddRowDialogContent({ open, onClose, editRow }: AddRowDialogProps) {
   const [timeUtc, setTimeUtc] = useState(initialState.timeUtc)
   const [journalType, setJournalType] = useState<JournalType>(initialState.journalType)
   const [exchangeName, setExchangeName] = useState(initialState.exchangeName)
+  const [wallet, setWallet] = useState<Wallet>(initialState.wallet)
   const [instrument, setInstrument] = useState(initialState.instrument)
   const [side, setSide] = useState<TradeSide>(initialState.side)
   const [quantity, setQuantity] = useState(initialState.quantity)
   const [cost, setCost] = useState(initialState.cost)
   const [takerSide, setTakerSide] = useState(initialState.takerSide)
   const [balanceOverride, setBalanceOverride] = useState(initialState.balanceOverride)
+  const [userBrlCost, setUserBrlCost] = useState(initialState.userBrlCost)
   const [pendingNewExchange, setPendingNewExchange] = useState<string | null>(null)
   const knownExchanges = useExchangeList()
+  const knownInstruments = useInstrumentList()
 
   const isEdit = !!editRow
   const dateValid = isValidDate(timeUtc)
   const manualUpdate = isManualUpdate(journalType)
+  const offchainSale = isOffchainSale(journalType)
+  const offchainWithdrawal = isOffchainWithdrawal(journalType)
   const balanceOverrideNumber = parseFloat(balanceOverride)
   const balanceOverrideValid = !manualUpdate || (balanceOverride.trim() !== '' && !Number.isNaN(balanceOverrideNumber))
+  const userBrlCostNumber = parseFloat(userBrlCost)
 
+  /**
+   * Saves the add/edit form into the transaction store.
+   * @param allowNewExchange - Whether a new exchange name has already been confirmed
+   */
   function handleSave(allowNewExchange = false) {
     const normalized = normalizeTo24h(timeUtc)
     const normalizedExchange = exchangeName.trim()
+    const nextWallet = offchainSale ? Wallet.EXTERNAL : manualUpdate || offchainWithdrawal ? Wallet.TRADING : wallet
     const nextBalanceOverride = manualUpdate ? balanceOverrideNumber : editRow?.balanceOverride
+    const nextQuantity = offchainSale
+      ? -Math.abs(parseFloat(quantity) || 0)
+      : parseFloat(quantity) || 0
+    const nextUserBrlCost = offchainSale && userBrlCost.trim() !== '' && !Number.isNaN(userBrlCostNumber)
+      ? userBrlCostNumber
+      : undefined
 
     if (normalizedExchange && !knownExchanges.includes(normalizedExchange) && !allowNewExchange) {
       setPendingNewExchange(normalizedExchange)
@@ -219,12 +277,18 @@ function AddRowDialogContent({ open, onClose, editRow }: AddRowDialogProps) {
         eventDate: parseCryptoComDate(normalized),
         journalType,
         exchangeName: normalizedExchange || undefined,
+        wallet: nextWallet,
         instrument: normalizeInstrumentInput(instrument),
-        takerSide: manualUpdate ? '' : takerSide.trim(),
-        side: manualUpdate ? null : side,
-        transactionQuantity: manualUpdate ? 0 : parseFloat(quantity) || 0,
-        transactionCost: manualUpdate ? 0 : parseFloat(cost) || 0,
+        takerSide: manualUpdate || offchainSale ? '' : takerSide.trim(),
+        side: manualUpdate || offchainSale ? null : side,
+        transactionQuantity: manualUpdate ? 0 : nextQuantity,
+        transactionCost: manualUpdate || offchainSale ? 0 : parseFloat(cost) || 0,
         balanceOverride: nextBalanceOverride,
+        userBrlCost: offchainSale
+          ? nextUserBrlCost
+          : editRow?.journalType === JournalType.OFFCHAIN_SALE
+            ? undefined
+            : editRow?.userBrlCost,
       })
     } else {
       const maxOrder = rawTransactions.reduce((max, r) => Math.max(max, r.order), 0)
@@ -235,11 +299,12 @@ function AddRowDialogContent({ open, onClose, editRow }: AddRowDialogProps) {
         eventDate: parseCryptoComDate(normalized),
         journalType,
         exchangeName: normalizedExchange || undefined,
+        wallet: nextWallet,
         instrument: normalizeInstrumentInput(instrument),
-        takerSide: manualUpdate ? '' : takerSide.trim(),
-        side: manualUpdate ? null : side,
-        transactionQuantity: manualUpdate ? 0 : parseFloat(quantity) || 0,
-        transactionCost: manualUpdate ? 0 : parseFloat(cost) || 0,
+        takerSide: manualUpdate || offchainSale ? '' : takerSide.trim(),
+        side: manualUpdate || offchainSale ? null : side,
+        transactionQuantity: manualUpdate ? 0 : nextQuantity,
+        transactionCost: manualUpdate || offchainSale ? 0 : parseFloat(cost) || 0,
         usdBalance: 0,
         realizedPnl: 0,
         orderId: '',
@@ -247,6 +312,7 @@ function AddRowDialogContent({ open, onClose, editRow }: AddRowDialogProps) {
         tradeMatchId: '',
         clientOrderId: '',
         balanceOverride: manualUpdate ? balanceOverrideNumber : undefined,
+        userBrlCost: offchainSale ? nextUserBrlCost : undefined,
       }
       addManualRow(row)
     }
@@ -305,10 +371,20 @@ function AddRowDialogContent({ open, onClose, editRow }: AddRowDialogProps) {
                   const nextJournalType = e.target.value as JournalType
                   setJournalType(nextJournalType)
                   if (isManualUpdate(nextJournalType)) {
+                    setWallet(Wallet.TRADING)
                     setSide(null)
                     setQuantity('')
                     setCost('')
                     setTakerSide('')
+                  }
+                  if (isOffchainSale(nextJournalType)) {
+                    setWallet(Wallet.EXTERNAL)
+                    setSide(null)
+                    setCost('')
+                    setTakerSide('')
+                  }
+                  if (isOffchainWithdrawal(nextJournalType)) {
+                    setWallet(Wallet.TRADING)
                   }
                 }}
                 className="bg-surface-2 border border-border rounded px-2.5 py-1.5 text-xs text-text-primary outline-none focus:border-accent/50"
@@ -320,16 +396,36 @@ function AddRowDialogContent({ open, onClose, editRow }: AddRowDialogProps) {
             </label>
 
             <label className="flex flex-col gap-1">
-              <span className="text-xs text-text-secondary">Instrument</span>
-              <input
-                type="text"
-                value={instrument}
-                onChange={e => setInstrument(e.target.value)}
-                placeholder="BTC, SOL, USD..."
-                className="bg-surface-2 border border-border rounded px-2.5 py-1.5 text-xs text-text-primary outline-none focus:border-accent/50 placeholder:text-text-muted"
-              />
+              <span className="text-xs text-text-secondary">Wallet</span>
+              <select
+                value={offchainSale ? Wallet.EXTERNAL : manualUpdate || offchainWithdrawal ? Wallet.TRADING : wallet}
+                onChange={e => setWallet(e.target.value as Wallet)}
+                disabled={offchainSale || manualUpdate || offchainWithdrawal}
+                className="bg-surface-2 border border-border rounded px-2.5 py-1.5 text-xs text-text-primary outline-none focus:border-accent/50 disabled:opacity-60"
+              >
+                {walletOptions.map(option => (
+                  <option key={option} value={option}>{formatWallet(option)}</option>
+                ))}
+              </select>
             </label>
           </div>
+
+          <label className="flex flex-col gap-1">
+            <span className="text-xs text-text-secondary">Instrument</span>
+            <input
+              type="text"
+              list="instrument-options"
+              value={instrument}
+              onChange={e => setInstrument(e.target.value)}
+              placeholder="BTC, SOL, USD..."
+              className="bg-surface-2 border border-border rounded px-2.5 py-1.5 text-xs text-text-primary outline-none focus:border-accent/50 placeholder:text-text-muted"
+            />
+            <datalist id="instrument-options">
+              {knownInstruments.map(instrumentOption => (
+                <option key={instrumentOption} value={instrumentOption} />
+              ))}
+            </datalist>
+          </label>
 
           {manualUpdate ? (
             <label className="flex flex-col gap-1">
@@ -347,6 +443,30 @@ function AddRowDialogContent({ open, onClose, editRow }: AddRowDialogProps) {
                 <span className="text-[10px] text-danger">Enter the balance shown on the exchange</span>
               )}
             </label>
+          ) : offchainSale ? (
+            <div className="grid grid-cols-2 gap-3">
+              <label className="flex flex-col gap-1">
+                <span className="text-xs text-text-secondary">Quantity Sold</span>
+                <input
+                  type="text"
+                  value={quantity}
+                  onChange={e => setQuantity(e.target.value)}
+                  placeholder="0.00"
+                  className="bg-surface-2 border border-border rounded px-2.5 py-1.5 text-xs text-text-primary outline-none focus:border-accent/50 placeholder:text-text-muted"
+                />
+              </label>
+
+              <label className="flex flex-col gap-1">
+                <span className="text-xs text-text-secondary">BRL Sale Proceeds</span>
+                <input
+                  type="text"
+                  value={userBrlCost}
+                  onChange={e => setUserBrlCost(e.target.value)}
+                  placeholder="0.00"
+                  className="bg-surface-2 border border-border rounded px-2.5 py-1.5 text-xs text-text-primary outline-none focus:border-accent/50 placeholder:text-text-muted"
+                />
+              </label>
+            </div>
           ) : (
             <>
               <div className="grid grid-cols-2 gap-3">

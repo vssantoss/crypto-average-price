@@ -7,12 +7,12 @@ import { isUsdInstrument, isMergedUsdInternalTrade } from './usdMerge'
 /**
  * Checks whether a row can realize BRL profit/loss from a USD PTAX sale value.
  * @param row - Transaction row to inspect
- * @returns True for SELL trades, offchain and onchain withdrawals
+ * @returns True for SELL trades, offchain sales, and onchain withdrawals
  */
 function isProfitLossDisposition(row: CryptoComRow): boolean {
   return (
     (row.journalType === JournalType.TRADING && row.side === 'SELL') ||
-    row.journalType === JournalType.OFFCHAIN_WITHDRAWAL ||
+    row.journalType === JournalType.OFFCHAIN_SALE ||
     row.journalType === JournalType.ONCHAIN_WITHDRAWAL
   )
 }
@@ -146,6 +146,8 @@ export function calculateProfitLoss(
   if (manualSaleProceeds !== null) {
     return manualSaleProceeds - avgPrice * quantity
   }
+
+  if (row.journalType === JournalType.OFFCHAIN_SALE) return null
 
   if (ptaxRate === null) return null
 

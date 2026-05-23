@@ -14,10 +14,14 @@ This software is provided as is for personal recordkeeping and calculation assis
 
 - `quantity` means the row's `Tx Quantity`.
 - `abs(quantity)` means the positive version of `quantity`.
-- `balance before row` means the running balance immediately before the current row.
-- `balance after row` means the running balance shown on the current row.
+- `wallet` means where the row affects quantity: `Trading Wallet` or `External Wallet`.
+- `running balance` means the amount still held in the `Trading Wallet`.
+- `external balance` means the amount held in the `External Wallet`.
+- `total holdings` means `Running Balance + External Balance`.
+- `balance before row` means total holdings immediately before the current row when used for cost-basis math.
+- `balance after row` means total holdings after the current row when used for cost-basis math.
 - `BRL invested` means the total cost basis still assigned to the current holdings after the row.
-- `avg price` means `BRL invested / current balance`.
+- `avg price` means `BRL invested / total holdings`.
 - `PTAX` means the imported Banco Central do Brasil USD/BRL sell rate for the row date, or the most recent previous rate found within the lookup window.
 - `Trade Fee` means the positive quantity from linked `TRADE_FEE` rows when the fee uses the same instrument as the trading row.
 - `Net Tx Quantity` means `Tx Quantity - Trade Fee`.
@@ -26,7 +30,7 @@ This software is provided as is for personal recordkeeping and calculation assis
 
 Displayed as: `Running Balance`
 
-The running balance is the amount of the instrument held after each row.
+The running balance is the amount of the instrument held in the `Trading Wallet` after each row.
 
 Without a manual balance override:
 
@@ -52,7 +56,23 @@ It also calculates backward before the first override:
 previous running balance = current running balance - current row quantity
 ```
 
-Plain English: the app adds every incoming amount and subtracts every outgoing amount. If you manually tell the app the balance at one row, it uses that row as the known truth and fills the balances around it.
+Plain English: the app adds every incoming `Trading Wallet` amount and subtracts every outgoing `Trading Wallet` amount. If you manually tell the app the balance at one row, it uses that row as the known truth and fills the balances around it.
+
+`External Wallet` rows and `OFFCHAIN_SALE` rows do not change `Running Balance`.
+
+## External Balance
+
+Displayed as: `External Balance`
+
+The external balance is the amount held outside the `Trading Wallet`. This can come from an `OFFCHAIN_WITHDRAWAL` transfer or from a manually added row whose wallet is `External Wallet`.
+
+```text
+External Wallet row: External Balance changes by Tx Quantity
+OFFCHAIN_WITHDRAWAL: External Balance increases by abs(Tx Quantity)
+OFFCHAIN_SALE: External Balance decreases by abs(Tx Quantity)
+```
+
+Plain English: an `OFFCHAIN_WITHDRAWAL` is a transfer, not a sale. A manual `External Wallet` reward increases external holdings directly. The later manual `OFFCHAIN_SALE` row is the sale event that removes total holdings and can realize profit/loss.
 
 ### Manual Update Row
 
@@ -82,7 +102,7 @@ If no rate is found, the field is blank.
 
 Displayed as: `BRL Tx Cost`
 
-This field means "the BRL amount attached to this row." For buys and deposits, it is acquisition cost. For sells and withdrawals, it is sale proceeds.
+This field means "the BRL amount attached to this row." For buys and deposits, it is acquisition cost. For sells, onchain withdrawals, and offchain sales, it is sale proceeds.
 
 When a trading row has a linked same-instrument fee, PTAX-based trade math uses `Net Tx Quantity` instead of raw `Tx Quantity`.
 
@@ -97,7 +117,8 @@ BRL Tx Cost = manually entered BRL amount
 Rows that can use a manual BRL amount are:
 
 - deposits
-- withdrawals
+- onchain withdrawals
+- offchain sales
 - trading `BUY` rows
 - trading `SELL` rows
 
@@ -118,9 +139,9 @@ Buy 100 USDC with BTC, linked trade fee = 1 USDC, PTAX = 5.20
 BRL Tx Cost = 99 * 5.20 = R$ 514.80
 ```
 
-### USD-Like Sale Or Withdrawal
+### USD-Like Sale Or Onchain Withdrawal
 
-For a USD-like `SELL` row or withdrawal:
+For a USD-like `SELL` row or onchain withdrawal:
 
 ```text
 BRL Tx Cost = USD amount sold or withdrawn, after same-instrument trade fee, * PTAX Rate
@@ -148,9 +169,10 @@ The USD amount received comes from the linked USD-like row's `Net Tx Quantity`.
 `BRL Tx Cost` is blank when the app does not have enough information. Common cases:
 
 - no manual BRL amount was entered for a deposit
+- no manual BRL amount was entered for an `OFFCHAIN_SALE`
 - no PTAX rate is available for a PTAX-based sale value
 - the app cannot link both sides of a crypto-for-USD trade
-- the row is a non-USD withdrawal without a manual BRL amount
+- the row is a non-USD onchain withdrawal without a manual BRL amount
 
 ## BRL Balance
 
@@ -174,7 +196,7 @@ BRL invested after row = BRL invested before row + BRL Tx Cost
 
 If the row is a `BUY` or deposit but does not have a known BRL cost, the app cannot continue a reliable cost basis from that point until it finds a new usable starting point, such as a manual average price seed.
 
-### Sell, Withdrawal, Fee, Or Dust
+### Sell, Offchain Sale, Onchain Withdrawal, Fee, Or Dust
 
 For rows that remove holdings, the app removes cost basis at the current average price:
 
@@ -185,6 +207,8 @@ BRL invested after row = BRL invested before row - cost basis removed
 ```
 
 Plain English: selling or removing part of a coin removes the same proportion of BRL cost basis that those units carried before the row.
+
+`OFFCHAIN_WITHDRAWAL` does not remove BRL cost basis. It only moves quantity from `Running Balance` to `External Balance`, so total holdings and average price stay aligned until an `OFFCHAIN_SALE` row is created.
 
 Linked same-instrument fee rows are not counted a second time in BRL cost basis after their quantity has already been folded into the trading row's `Net Tx Quantity`.
 
@@ -214,23 +238,23 @@ This preserves the same average price instead of treating the stablecoin swap as
 
 Displayed as: `BRL Avg Price`
 
-Average price is calculated from the current BRL balance and current running balance:
+Average price is calculated from the current BRL balance and total holdings:
 
 ```text
-BRL Avg Price = BRL Balance / Running Balance
+BRL Avg Price = BRL Balance / (Running Balance + External Balance)
 ```
 
 The field is blank when:
 
 - `BRL Balance` is unknown
-- `Running Balance` is zero or negative
+- total holdings are zero or negative
 
 ### Manual Average Price Seed
 
 If the user enters a manual `BRL Avg Price` on a row, that row becomes an anchor:
 
 ```text
-BRL Balance at seed row = manual BRL Avg Price * Running Balance at seed row
+BRL Balance at seed row = manual BRL Avg Price * total holdings at seed row
 ```
 
 The app then calculates forward from that seed using later rows.
@@ -256,7 +280,7 @@ Displayed as: `BRL Profit/Loss`
 This is only calculated on disposition rows:
 
 - trading `SELL`
-- offchain withdrawal
+- offchain sale
 - onchain withdrawal
 
 The general formula is:
@@ -281,7 +305,7 @@ If the row has a manually entered `BRL Tx Cost`, that manual value is treated as
 BRL Profit/Loss = manual BRL Tx Cost - (BRL Avg Price * abs(Net Tx Quantity))
 ```
 
-### USD-Like Sale Or Withdrawal
+### USD-Like Sale Or Onchain Withdrawal
 
 For USD-like instruments:
 
@@ -303,43 +327,19 @@ BRL Profit/Loss = sale proceeds in BRL - (BRL Avg Price * abs(non-USD Net Tx Qua
 
 `BRL Profit/Loss` is blank when:
 
-- the row is not a sell or withdrawal
+- the row is not a sell, offchain sale, or onchain withdrawal
 - `BRL Avg Price` is blank
 - quantity is zero
 - the row is an internal USD-to-USD trade
 - no manual sale proceeds or PTAX-based sale proceeds can be calculated
-
-## Summary Panel Fields
-
-The summary panel uses the last calculated row for each instrument.
-
-### Current Balance
-
-```text
-Current Balance = Running Balance on the latest row for the instrument
-```
-
-### Average Price
-
-```text
-Average Price = BRL Avg Price on the latest row for the instrument
-```
-
-### BRL Balance
-
-```text
-BRL Balance = BRL Balance on the latest row for the instrument
-```
-
-### Total BRL Invested
-
-This field currently has no calculation and is returned as blank.
+- the row is an `OFFCHAIN_SALE` without manual BRL proceeds
 
 ## Source Files
 
 The math above is implemented mainly in:
 
 - `crypto-average-price/src/engine/runningBalance.ts`
+- `crypto-average-price/src/engine/offchainBalance.ts`
 - `crypto-average-price/src/engine/ptaxLookup.ts`
 - `crypto-average-price/src/engine/computeAllColumns.ts`
 - `crypto-average-price/src/engine/averagePrice.ts`
