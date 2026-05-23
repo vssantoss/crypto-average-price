@@ -1,15 +1,4 @@
 /**
- * Summary statistics for a single coin/instrument.
- */
-export interface CoinSummary {
-  instrument: string
-  currentBalance: number
-  averagePrice: number | null
-  totalBrlInvested: number | null
-  brlBalance: number | null
-}
-
-/**
  * Synthetic datatable column id for the edit/delete action gutter.
  */
 export const TABLE_ACTIONS_COLUMN_ID = '__rowActions'

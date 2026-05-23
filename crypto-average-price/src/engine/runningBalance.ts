@@ -1,4 +1,26 @@
 import type { CryptoComRow } from '../types/transaction'
+import { JournalType, Wallet } from '../types/transaction'
+
+/**
+ * Gets the wallet bucket for a row, defaulting imported rows to Trading Wallet.
+ * @param row - Transaction row to inspect
+ * @returns Wallet bucket used for balance calculations
+ */
+function getWallet(row: CryptoComRow): Wallet {
+  return row.wallet ?? Wallet.TRADING
+}
+
+/**
+ * Gets the quantity that should affect the trading wallet running balance.
+ * @param row - Transaction row to inspect
+ * @returns Quantity to add to the trading wallet running balance
+ */
+function getRunningBalanceDelta(row: CryptoComRow): number {
+  if (row.journalType === JournalType.OFFCHAIN_SALE) return 0
+  if (row.journalType === JournalType.OFFCHAIN_WITHDRAWAL) return row.transactionQuantity
+  if (getWallet(row) === Wallet.EXTERNAL) return 0
+  return row.transactionQuantity
+}
 
 /**
  * Calculates running balances for a list of transactions belonging to one instrument.
@@ -25,7 +47,7 @@ export function calculateRunningBalances(
   if (overrideIndices.length === 0) {
     let balance = 0
     for (let i = 0; i < n; i++) {
-      balance += rows[i].transactionQuantity
+      balance += getRunningBalanceDelta(rows[i])
       balances[i] = balance
     }
     return balances
@@ -36,7 +58,7 @@ export function calculateRunningBalances(
   let bal = rows[firstIdx].balanceOverride!
   balances[firstIdx] = bal
   for (let i = firstIdx - 1; i >= 0; i--) {
-    bal -= rows[i + 1].transactionQuantity
+    bal -= getRunningBalanceDelta(rows[i + 1])
     balances[i] = bal
   }
 
@@ -48,7 +70,7 @@ export function calculateRunningBalances(
 
     const segEnd = seg < overrideIndices.length - 1 ? overrideIndices[seg + 1] : n
     for (let i = idx + 1; i < segEnd; i++) {
-      balance += rows[i].transactionQuantity
+      balance += getRunningBalanceDelta(rows[i])
       balances[i] = balance
     }
   }

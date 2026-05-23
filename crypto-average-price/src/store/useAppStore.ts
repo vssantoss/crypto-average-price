@@ -87,6 +87,7 @@ export const defaultColumnLayout: TableLayoutSettings = {
   columnVisibility: {
     order: false,
     eventDate: false,
+    wallet: false,
     takerSide: false,
     transactionCost: false,
     exchangeName: false,

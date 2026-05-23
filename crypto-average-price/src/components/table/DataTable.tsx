@@ -23,7 +23,7 @@ import { EditableCell } from './EditableCell'
 import { AddRowDialog } from '../dialogs/AddRowDialog'
 import { Dialog, DialogFooter, dialogCancelClass, dialogDangerClass } from '../common/Dialog'
 import type { CryptoComRow } from '../../types/transaction'
-import { AlertTriangle, ArrowUp, ArrowDown, Pencil, Trash2 } from 'lucide-react'
+import { AlertTriangle, ArrowUp, ArrowDown, Pencil, Trash2, X } from 'lucide-react'
 
 const caseInsensitiveFilter: FilterFn<ProcessedRow> = (row, columnId, filterValue) => {
   const value = String(row.getValue(columnId) ?? '').toLowerCase()
@@ -36,6 +36,7 @@ const CALCULATED_COLUMN_IDS = new Set([
   'tradeFeeQuantity',
   'netTransactionQuantity',
   'runningBalance',
+  'offchainBalance',
   'cambioBC',
   'brlRunningBalance',
   'usdTransactionCost',
@@ -68,7 +69,7 @@ type RowType = 'buy' | 'sell' | 'neutral'
 /**
  * Determines the visual category of a row for styling.
  * @param row - Processed row to classify
- * @returns 'buy' for acquisitions/deposits, 'sell' for dispositions/withdrawals, 'neutral' otherwise
+ * @returns 'buy' for acquisitions/deposits, 'sell' for sales/dispositions, 'neutral' otherwise
  */
 function getRowType(row: ProcessedRow): RowType {
   if (
@@ -78,7 +79,7 @@ function getRowType(row: ProcessedRow): RowType {
   ) return 'buy'
   if (
     row.side === 'SELL' ||
-    row.journalType === JournalType.OFFCHAIN_WITHDRAWAL ||
+    row.journalType === JournalType.OFFCHAIN_SALE ||
     row.journalType === JournalType.ONCHAIN_WITHDRAWAL
   ) return 'sell'
   return 'neutral'
@@ -305,6 +306,7 @@ export function DataTable({ data }: DataTableProps) {
       .map(f => ({ column: headerMap[f.id] || f.id, value: formatActiveFilterValue(f.value) }))
       .filter(f => f.value)
   }, [columnFilters, headerMap])
+  const hasActiveFilters = columnFilters.length > 0
 
   useEffect(() => {
     setActiveTableFilters(activeFilters)
@@ -315,6 +317,13 @@ export function DataTable({ data }: DataTableProps) {
       const next = typeof updater === 'function' ? updater(prev) : updater
       return next
     })
+  }
+
+  /**
+   * Clears every table column filter.
+   */
+  function clearFilters(): void {
+    setColumnFiltersRaw([])
   }
 
   useLayoutEffect(() => {
@@ -393,7 +402,18 @@ export function DataTable({ data }: DataTableProps) {
               <th
                 className="w-[40px] min-w-[40px] px-0 py-2 border-b border-border"
                 style={actionHeaderSticky.style}
-              />
+              >
+                {hasActiveFilters && (
+                  <button
+                    onClick={clearFilters}
+                    className="mx-auto flex h-6 w-6 items-center justify-center rounded border border-border bg-surface-1 text-text-muted transition-colors hover:border-border-light hover:text-text-primary"
+                    title="Clear filters"
+                    aria-label="Clear filters"
+                  >
+                    <X size={13} />
+                  </button>
+                )}
+              </th>
               {headerGroup.headers.map(header => {
                 const meta = header.column.columnDef.meta as TableColumnMeta | undefined
                 const numeric = isNumericColumn(meta)

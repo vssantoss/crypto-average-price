@@ -8,12 +8,23 @@ export const JournalType = {
   OFFCHAIN_DEPOSIT: 'OFFCHAIN_DEPOSIT',
   ONCHAIN_DEPOSIT: 'ONCHAIN_DEPOSIT',
   OFFCHAIN_WITHDRAWAL: 'OFFCHAIN_WITHDRAWAL',
+  OFFCHAIN_SALE: 'OFFCHAIN_SALE',
   ONCHAIN_WITHDRAWAL: 'ONCHAIN_WITHDRAWAL',
   CRYPTO_DUSTING: 'CRYPTO_DUSTING',
   MANUAL_UPDATE: 'MANUAL_UPDATE',
 } as const
 
 export type JournalType = (typeof JournalType)[keyof typeof JournalType]
+
+/**
+ * Wallet buckets used by manual rows to decide which balance changes.
+ */
+export const Wallet = {
+  TRADING: 'TRADING',
+  EXTERNAL: 'EXTERNAL',
+} as const
+
+export type Wallet = (typeof Wallet)[keyof typeof Wallet]
 
 /**
  * Possible trade sides from the Crypto.com report.
@@ -45,6 +56,8 @@ export interface CryptoComRow {
   exchangeName?: string
   /** Original imported transaction filename */
   sourceFileName?: string
+  /** Wallet bucket affected by this transaction */
+  wallet?: Wallet
   /** User-provided BRL transaction amount override */
   userBrlCost?: number
   /** User-provided USD transaction amount override */
@@ -73,6 +86,7 @@ export interface ProcessedRow {
   originalInstrument: string
   exchangeName: string
   sourceFileName: string
+  wallet: Wallet
   takerSide: string
   side: TradeSide
   transactionQuantity: number
@@ -80,6 +94,7 @@ export interface ProcessedRow {
   netTransactionQuantity: number
   transactionCost: number
   runningBalance: number
+  offchainBalance: number
   cambioBC: number | null
   brlRunningBalance: number | null
   brlTransactionCost: number | null

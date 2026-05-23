@@ -166,6 +166,16 @@ export function createColumns(timezoneOffset: number, roundBalance: boolean = fa
       formatFilterValue: formatJournalType,
     },
   }),
+  columnHelper.accessor('wallet', {
+    header: 'Wallet',
+    size: 140,
+    cell: info => formatWallet(info.getValue()),
+    filterFn: multiValueFilter,
+    meta: {
+      filterType: 'multiselect' as const,
+      formatFilterValue: formatWallet,
+    },
+  }),
   columnHelper.accessor('instrument', {
     header: 'Instrument',
     size: 130,
@@ -221,6 +231,13 @@ export function createColumns(timezoneOffset: number, roundBalance: boolean = fa
       if (isUsdInstrument(instrument)) return formatUsd(info.getValue())
       return formatNumber(info.getValue(), roundBalance ? 2 : 8)
     },
+    enableColumnFilter: false,
+    meta: { numeric: true },
+  }),
+  columnHelper.accessor('offchainBalance', {
+    header: 'External Balance',
+    size: 140,
+    cell: info => shouldHideCalculatedValue(info.row.original) ? '' : formatNumber(info.getValue(), roundBalance ? 2 : 8),
     enableColumnFilter: false,
     meta: { numeric: true },
   }),
@@ -322,4 +339,13 @@ export function createColumns(timezoneOffset: number, roundBalance: boolean = fa
  */
 function formatJournalType(type: JournalType): string {
   return type.replace(/_/g, ' ')
+}
+
+/**
+ * Formats a Wallet enum value for display.
+ * @param wallet - Wallet enum value
+ * @returns Human-readable wallet label
+ */
+function formatWallet(wallet: string): string {
+  return wallet === 'EXTERNAL' ? 'External Wallet' : 'Trading Wallet'
 }

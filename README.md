@@ -18,6 +18,7 @@ This app is a work in progress and is not even an alpha release. It may contain 
 - Detect duplicate imported transactions and choose whether to skip or include them.
 - Import Banco Central do Brasil PTAX CSV files for USD/BRL rates.
 - Merge USD-like stablecoin rows when calculating balances.
+- Track external-wallet transfers with External Balance and manual OFFCHAIN SALE rows.
 - Filter by coin, hide/show table columns, and edit manual overrides.
 - Add, edit, or delete transaction rows.
 - Export the current view or all processed rows to CSV.

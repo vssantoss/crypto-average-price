@@ -1,5 +1,5 @@
 import type { CryptoComRow, ProcessedRow } from '../types/transaction'
-import { JournalType } from '../types/transaction'
+import { JournalType, Wallet } from '../types/transaction'
 import type { PtaxMap } from '../types/ptax'
 import {
   buildTradeMatchIndex,
@@ -11,6 +11,7 @@ import {
   isFoldedTradeFeeRow,
 } from './tradeMatching'
 import { calculateRunningBalances } from './runningBalance'
+import { calculateOffchainBalances } from './offchainBalance'
 import { lookupPtaxRate } from './ptaxLookup'
 import { calculateAveragePrices, type AveragePriceContext, type AvgPriceResult } from './averagePrice'
 import { calculateProfitLoss } from './profitLoss'
@@ -38,9 +39,8 @@ function isDeposit(journalType: JournalType): boolean {
  * @param journalType - The journal type of the row
  * @returns True if this row type removes holdings as a withdrawal
  */
-function isWithdrawal(journalType: JournalType): boolean {
+function isWithdrawalDisposition(journalType: JournalType): boolean {
   return (
-    journalType === JournalType.OFFCHAIN_WITHDRAWAL ||
     journalType === JournalType.ONCHAIN_WITHDRAWAL
   )
 }
@@ -53,8 +53,18 @@ function isWithdrawal(journalType: JournalType): boolean {
 function isSaleOrWithdrawal(row: CryptoComRow): boolean {
   return (
     (row.journalType === JournalType.TRADING && row.side === 'SELL') ||
-    isWithdrawal(row.journalType)
+    row.journalType === JournalType.OFFCHAIN_SALE ||
+    isWithdrawalDisposition(row.journalType)
   )
+}
+
+/**
+ * Gets the wallet bucket for a row, defaulting imported rows to Trading Wallet.
+ * @param row - Transaction row to inspect
+ * @returns Wallet bucket used for display and balance calculations
+ */
+function getWallet(row: CryptoComRow): Wallet {
+  return row.wallet ?? Wallet.TRADING
 }
 
 /**
@@ -95,9 +105,39 @@ function canEditUsdTransactionCost(
 
   return (
     isDeposit(row.journalType) ||
-    isSaleOrWithdrawal(row) ||
+    isWithdrawalDisposition(row.journalType) ||
+    (row.journalType === JournalType.TRADING && row.side === 'SELL') ||
     (row.journalType === JournalType.TRADING && row.side === 'BUY')
   )
+}
+
+/**
+ * Creates rows whose quantities represent total holdings for cost-basis math.
+ * @param rows - Normalized instrument rows
+ * @returns Rows with offchain transfer quantities adjusted for cost-basis calculations
+ */
+function createCostBasisRows(rows: CryptoComRow[]): CryptoComRow[] {
+  return rows.map(row => {
+    if (row.journalType === JournalType.OFFCHAIN_WITHDRAWAL) {
+      return { ...row, transactionQuantity: 0 }
+    }
+
+    if (row.journalType === JournalType.OFFCHAIN_SALE) {
+      return { ...row, transactionQuantity: -Math.abs(row.transactionQuantity) }
+    }
+
+    return row
+  })
+}
+
+/**
+ * Adds trading and external balances to get total holdings for cost basis.
+ * @param runningBalances - Exchange running balances
+ * @param offchainBalances - Offchain balances
+ * @returns Total holdings after each row
+ */
+function calculateTotalBalances(runningBalances: number[], offchainBalances: number[]): number[] {
+  return runningBalances.map((balance, index) => balance + offchainBalances[index])
 }
 
 /**
@@ -277,6 +317,7 @@ function computePtaxSaleValue(
   tradeLinkIndex: ReturnType<typeof buildTradeLinkIndex>,
 ): number | null {
   if (!isSaleOrWithdrawal(row) || ptaxRate === null) return null
+  if (row.journalType === JournalType.OFFCHAIN_SALE) return null
 
   if (isUsdInstrument(row.instrument)) {
     const usdQuantity = getUsdQuantity(row, tradeLinkIndex)
@@ -388,7 +429,10 @@ function computeBrlCostRate(
 
 interface InstrumentComputation {
   rows: CryptoComRow[]
+  costBasisRows: CryptoComRow[]
   runningBalances: number[]
+  offchainBalances: number[]
+  totalBalances: number[]
   brlResults: AvgPriceResult[]
   usdResults: AvgPriceResult[]
 }
@@ -433,10 +477,13 @@ export function computeAllColumns(
     if (instrumentRows.length === 0) continue
 
     const runningBalances = calculateRunningBalances(instrumentRows)
+    const offchainBalances = calculateOffchainBalances(instrumentRows)
+    const totalBalances = calculateTotalBalances(runningBalances, offchainBalances)
+    const costBasisRows = createCostBasisRows(instrumentRows)
 
     const initialBrlResults = calculateAveragePrices(
-      instrumentRows,
-      runningBalances,
+      costBasisRows,
+      totalBalances,
       tradeIndex,
       tradeLinkIndex,
       {
@@ -456,7 +503,10 @@ export function computeAllColumns(
 
     computations.set(inst, {
       rows: instrumentRows,
+      costBasisRows,
       runningBalances,
+      offchainBalances,
+      totalBalances,
       brlResults: initialBrlResults,
       usdResults: [],
     })
@@ -464,8 +514,8 @@ export function computeAllColumns(
 
   for (const computation of computations.values()) {
     const brlResults = calculateAveragePrices(
-      computation.rows,
-      computation.runningBalances,
+      computation.costBasisRows,
+      computation.totalBalances,
       tradeIndex,
       tradeLinkIndex,
       {
@@ -474,8 +524,8 @@ export function computeAllColumns(
       },
     )
     const usdResults = calculateAveragePrices(
-      computation.rows,
-      computation.runningBalances,
+      computation.costBasisRows,
+      computation.totalBalances,
       tradeIndex,
       tradeLinkIndex,
       {
@@ -495,6 +545,7 @@ export function computeAllColumns(
     for (let i = 0; i < instrumentRows.length; i++) {
       const row = instrumentRows[i]
       const balance = computation.runningBalances[i]
+      const offchainBalance = computation.offchainBalances[i]
       const avgResult = computation.brlResults[i]
       const usdResult = computation.usdResults[i]
       const ptaxRate = lookupPtaxRate(row.eventDate, ptaxMap)
@@ -516,10 +567,11 @@ export function computeAllColumns(
       const usdRunningBalance = isStablecoinRow ? null : usdResult.invested
       const usdAveragePrice = isStablecoinRow ? null : usdResult.avgPrice
       const brlCostRate = computeBrlCostRate(row, stablecoinAvgBeforeByOrder, tradeLinkIndex)
+      const profitLossAvgPrice = avgResult.avgPriceBefore ?? avgResult.avgPrice
 
       const profitLoss = calculateProfitLoss(
         row,
-        avgResult.avgPrice,
+        profitLossAvgPrice,
         ptaxRate,
         tradeIndex,
         tradeLinkIndex,
@@ -543,6 +595,7 @@ export function computeAllColumns(
         originalInstrument,
         exchangeName: row.exchangeName || '',
         sourceFileName: row.sourceFileName || '',
+        wallet: getWallet(originalRow || row),
         takerSide: row.takerSide,
         side: row.side,
         transactionQuantity: row.transactionQuantity,
@@ -550,6 +603,7 @@ export function computeAllColumns(
         netTransactionQuantity,
         transactionCost: row.transactionCost,
         runningBalance: balance,
+        offchainBalance,
         cambioBC: ptaxRate,
         brlRunningBalance,
         brlTransactionCost,

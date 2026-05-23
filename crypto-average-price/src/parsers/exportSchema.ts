@@ -1,3 +1,4 @@
+import { Wallet } from '../types/transaction'
 import type { CryptoComRow, JournalType, ProcessedRow, TradeSide } from '../types/transaction'
 import type { PtaxMap } from '../types/ptax'
 import { parseCryptoComDate } from '../utils/date'
@@ -12,6 +13,7 @@ export const EXPORT_CSV_COLUMNS = {
   TIME_UTC: 'Time (UTC)',
   EVENT_DATE: 'Event Date',
   JOURNAL_TYPE: 'Journal Type',
+  WALLET: 'Wallet',
   EXCHANGE: 'Exchange',
   SOURCE_FILE: 'Source File',
   INSTRUMENT: 'Instrument',
@@ -27,6 +29,7 @@ export const EXPORT_CSV_COLUMNS = {
   TRADE_MATCH_ID: 'Trade Match ID',
   CLIENT_ORDER_ID: 'Client Order Id',
   RUNNING_BALANCE: 'Running Balance',
+  OFFCHAIN_BALANCE: 'External Balance',
   PTAX_RATE: 'PTAX Rate',
   BRL_RUNNING_BALANCE: 'BRL Running Balance',
   USD_RUNNING_BALANCE: 'USD Balance',
@@ -78,6 +81,7 @@ export function buildExportCsvRow(row: ProcessedRow, raw?: CryptoComRow, options
     [C.TIME_UTC]: row.timeUtc,
     [C.EVENT_DATE]: row.eventDate,
     [C.JOURNAL_TYPE]: row.journalType,
+    [C.WALLET]: row.wallet,
     [C.INSTRUMENT]: row.instrument,
     [C.ORIGINAL_INSTRUMENT]: row.originalInstrument,
     [C.TAKER_SIDE]: row.takerSide,
@@ -87,6 +91,7 @@ export function buildExportCsvRow(row: ProcessedRow, raw?: CryptoComRow, options
     ...(calc && { [C.NET_TRANSACTION_QUANTITY]: getCalculatedExportValue(row, row.netTransactionQuantity) }),
     [C.TRANSACTION_COST]: row.transactionCost,
     ...(calc && { [C.RUNNING_BALANCE]: getCalculatedExportValue(row, row.runningBalance) }),
+    ...(calc && { [C.OFFCHAIN_BALANCE]: getCalculatedExportValue(row, row.offchainBalance) }),
     [C.PTAX_RATE]: getCalculatedExportValue(row, row.cambioBC),
     ...(calc && { [C.BRL_RUNNING_BALANCE]: getCalculatedExportValue(row, row.brlRunningBalance) }),
     ...(calc && { [C.USD_RUNNING_BALANCE]: getCalculatedExportValue(row, row.usdRunningBalance) }),
@@ -138,6 +143,7 @@ export function parseExportedCsvRow(rawRow: Record<string, string>): {
     timeUtc: rawRow[C.TIME_UTC]?.trim() || '',
     eventDate,
     journalType: rawRow[C.JOURNAL_TYPE]?.trim() as JournalType,
+    wallet: rawRow[C.WALLET]?.trim() === Wallet.EXTERNAL ? Wallet.EXTERNAL : Wallet.TRADING,
     exchangeName: rawRow[C.EXCHANGE]?.trim() || undefined,
     sourceFileName: rawRow[C.SOURCE_FILE]?.trim() || undefined,
     instrument: rawRow[C.ORIGINAL_INSTRUMENT]?.trim() || rawRow[C.INSTRUMENT]?.trim() || '',

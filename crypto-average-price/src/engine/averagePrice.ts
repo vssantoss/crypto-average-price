@@ -33,7 +33,7 @@ export interface AveragePriceOptions {
  */
 function isDisposition(type: JournalType): boolean {
   return (
-    type === JournalType.OFFCHAIN_WITHDRAWAL ||
+    type === JournalType.OFFCHAIN_SALE ||
     type === JournalType.ONCHAIN_WITHDRAWAL ||
     type === JournalType.TRADE_FEE ||
     type === JournalType.CRYPTO_DUSTING
