@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, type CSSProperties } from 'react'
+import { useState, useMemo, useEffect, useLayoutEffect, type CSSProperties } from 'react'
 import {
   useReactTable,
   getCoreRowModel,
@@ -16,7 +16,7 @@ import {
 import type { ProcessedRow } from '../../types/transaction'
 import { JournalType } from '../../types/transaction'
 import { useAppStore } from '../../store/useAppStore'
-import { TABLE_ACTIONS_COLUMN_ID } from '../../types/app'
+import { MERGED_USD_NAME, TABLE_ACTIONS_COLUMN_ID } from '../../types/app'
 import { createColumns } from './columns'
 import { ColumnFilter } from './ColumnFilter'
 import { EditableCell } from './EditableCell'
@@ -38,6 +38,10 @@ const CALCULATED_COLUMN_IDS = new Set([
   'runningBalance',
   'cambioBC',
   'brlRunningBalance',
+  'usdTransactionCost',
+  'usdRunningBalance',
+  'usdAveragePrice',
+  'brlCostRate',
   'brlTransactionCost',
   'precoMedioCompra',
   'totalLucroPrejuizo',
@@ -229,6 +233,18 @@ function formatActiveFilterValue(value: unknown): string {
 }
 
 /**
+ * Checks whether the instrument filter selects only the merged USD instrument.
+ * @param filter - Current instrument column filter, if one exists
+ * @returns True when the filter includes no instruments except the merged USD label
+ */
+function isOnlyMergedUsdInstrumentFilter(filter: ColumnFiltersState[number] | undefined): boolean {
+  if (!filter) return false
+  const value = filter.value
+  if (!Array.isArray(value)) return false
+  return value.length === 1 && String(value[0]) === MERGED_USD_NAME
+}
+
+/**
  * Main datatable component.
  * Renders a TanStack Table with sorting, filtering, column visibility,
  * and inline-editable cells for Info, BRL cost, and avg price seed.
@@ -258,10 +274,13 @@ export function DataTable({ data }: DataTableProps) {
   const setActiveTableRowOrders = useAppStore(s => s.setActiveTableRowOrders)
   const setInfoEdit = useAppStore(s => s.setInfoEdit)
   const setAvgPriceSeed = useAppStore(s => s.setAvgPriceSeed)
+  const setUsdAvgPriceSeed = useAppStore(s => s.setUsdAvgPriceSeed)
   const setUserBrlCost = useAppStore(s => s.setUserBrlCost)
+  const setUserUsdCost = useAppStore(s => s.setUserUsdCost)
   const setBalanceOverride = useAppStore(s => s.setBalanceOverride)
   const deleteRow = useAppStore(s => s.deleteRow)
   const rawTransactions = useAppStore(s => s.rawTransactions)
+  const usdMergeEnabled = useAppStore(s => s.settings.usdMergeEnabled)
   const timezoneOffset = useAppStore(s => s.settings.timezoneOffset)
   const roundBalance = useAppStore(s => s.settings.roundBalance)
   const cols = useMemo(() => createColumns(timezoneOffset, roundBalance), [timezoneOffset, roundBalance])
@@ -297,6 +316,16 @@ export function DataTable({ data }: DataTableProps) {
       return next
     })
   }
+
+  useLayoutEffect(() => {
+    if (usdMergeEnabled) return
+
+    setColumnFiltersRaw(prev => {
+      const instrumentFilter = prev.find(filter => filter.id === 'instrument')
+      if (!isOnlyMergedUsdInstrumentFilter(instrumentFilter)) return prev
+      return prev.filter(filter => filter.id !== 'instrument')
+    })
+  }, [usdMergeEnabled])
 
   // TanStack Table returns non-memoizable functions; the table instance is still the intended API boundary here.
   // eslint-disable-next-line react-hooks/incompatible-library
@@ -506,6 +535,32 @@ export function DataTable({ data }: DataTableProps) {
                     )
                   }
 
+                  if (meta?.editable === 'usdAvgPrice' && original.isEditable.usdAvgPrice) {
+                    const calculatedValue = original.usdAveragePrice !== null ? original.usdAveragePrice.toFixed(roundBalance ? 2 : 4) : ''
+                    const manualValue = raw?.usdAvgPriceSeed !== undefined ? raw.usdAvgPriceSeed.toString() : ''
+
+                    return (
+                      <td
+                        key={cell.id}
+                        className="px-2 py-1 border-b border-border/50 text-right tabular-nums"
+                        style={sticky.style}
+                      >
+                        <EditableCell
+                          value={calculatedValue}
+                          editValue={manualValue}
+                          editPlaceholder={calculatedValue}
+                          onSave={val => {
+                            const num = parseFloat(val)
+                            setUsdAvgPriceSeed(original.order, isNaN(num) ? null : num)
+                          }}
+                          placeholder="Set USD avg..."
+                          className="justify-end text-right"
+                          showIcon={false}
+                        />
+                      </td>
+                    )
+                  }
+
                   // Editable running balance
                   if (cell.column.id === 'runningBalance') {
                     const calculatedValue = formatNumber(original.runningBalance, roundBalance ? 2 : 8)
@@ -553,6 +608,32 @@ export function DataTable({ data }: DataTableProps) {
                             setUserBrlCost(original.order, isNaN(num) ? null : num)
                           }}
                           placeholder="Enter BRL amount..."
+                          className="justify-end text-right"
+                          showIcon={false}
+                        />
+                      </td>
+                    )
+                  }
+
+                  if (cell.column.id === 'usdTransactionCost' && original.isEditable.usdCost) {
+                    const calculatedValue = original.usdTransactionCost !== null ? original.usdTransactionCost.toFixed(roundBalance ? 2 : 4) : ''
+                    const manualValue = raw?.userUsdCost !== undefined ? raw.userUsdCost.toString() : ''
+
+                    return (
+                      <td
+                        key={cell.id}
+                        className="px-2 py-1 border-b border-border/50 text-right tabular-nums"
+                        style={sticky.style}
+                      >
+                        <EditableCell
+                          value={calculatedValue}
+                          editValue={manualValue}
+                          editPlaceholder={calculatedValue}
+                          onSave={val => {
+                            const num = parseFloat(val)
+                            setUserUsdCost(original.order, isNaN(num) ? null : num)
+                          }}
+                          placeholder="Enter USD amount..."
                           className="justify-end text-right"
                           showIcon={false}
                         />

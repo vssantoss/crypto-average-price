@@ -16,6 +16,7 @@ interface ImportTransactionsResult {
   importedCount: number
   duplicateCount: number
   cancelled: boolean
+  error?: string
 }
 
 export type DuplicateImportDecision = 'cancel' | 'skip' | 'include'
@@ -53,8 +54,10 @@ interface AppState {
   importPtax: (files: FileList) => Promise<void>
   importExported: (file: File) => Promise<void>
   setUserBrlCost: (order: number, value: number | null) => void
+  setUserUsdCost: (order: number, value: number | null) => void
   setBalanceOverride: (order: number, value: number | null) => void
   setAvgPriceSeed: (order: number, value: number | null) => void
+  setUsdAvgPriceSeed: (order: number, value: number | null) => void
   addManualRow: (row: CryptoComRow) => void
   updateRow: (order: number, updates: Partial<CryptoComRow>) => void
   deleteRow: (order: number) => void
@@ -274,8 +277,9 @@ export const useAppStore = create<AppState>()((set, get) => ({
       persist(get())
       return { importedCount: rowsToImport.length, duplicateCount, cancelled: false }
     } catch (err) {
-      set({ isLoading: false, error: (err as Error).message })
-      return { importedCount: 0, duplicateCount: 0, cancelled: false }
+      const error = (err as Error).message
+      set({ isLoading: false, error })
+      return { importedCount: 0, duplicateCount: 0, cancelled: false, error }
     }
   },
 
@@ -322,6 +326,13 @@ export const useAppStore = create<AppState>()((set, get) => ({
     persist(get())
   },
 
+  setUserUsdCost(order: number, value: number | null) {
+    set(state => ({
+      rawTransactions: updateRowField(state.rawTransactions, order, 'userUsdCost', value === null ? undefined : value),
+    }))
+    persist(get())
+  },
+
   setBalanceOverride(order: number, value: number | null) {
     set(state => ({
       rawTransactions: updateRowField(state.rawTransactions, order, 'balanceOverride', value === null ? undefined : value),
@@ -332,6 +343,13 @@ export const useAppStore = create<AppState>()((set, get) => ({
   setAvgPriceSeed(order: number, value: number | null) {
     set(state => ({
       rawTransactions: updateRowField(state.rawTransactions, order, 'avgPriceSeed', value === null ? undefined : value),
+    }))
+    persist(get())
+  },
+
+  setUsdAvgPriceSeed(order: number, value: number | null) {
+    set(state => ({
+      rawTransactions: updateRowField(state.rawTransactions, order, 'usdAvgPriceSeed', value === null ? undefined : value),
     }))
     persist(get())
   },

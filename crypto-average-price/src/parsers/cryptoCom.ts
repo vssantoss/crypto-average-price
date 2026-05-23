@@ -1,6 +1,7 @@
 import Papa from 'papaparse'
 import { type CryptoComRow, JournalType, type TradeSide } from '../types/transaction'
 import { parseCryptoComDate } from '../utils/date'
+import { EXPORT_CSV_COLUMNS } from './exportSchema'
 
 /**
  * Known column names from the Crypto.com transaction report CSV header.
@@ -22,6 +23,19 @@ const COLUMN_MAP: Record<string, keyof CryptoComRow> = {
   'Trade ID': 'tradeId',
   'Trade Match ID': 'tradeMatchId',
   'Client Order Id': 'clientOrderId',
+}
+
+/**
+ * Checks whether CSV headers belong to an app backup export instead of a Crypto.com report.
+ * @param fields - Header names parsed from the selected CSV
+ * @returns True when backup-only headers are present
+ */
+export function hasBackupCsvHeaders(fields: string[]): boolean {
+  const headerSet = new Set(fields.map(field => field.trim()))
+  return headerSet.has(EXPORT_CSV_COLUMNS.ORIGINAL_INSTRUMENT) ||
+    headerSet.has(EXPORT_CSV_COLUMNS.AVG_PRICE_SEED) ||
+    headerSet.has(EXPORT_CSV_COLUMNS.USER_BRL_COST) ||
+    headerSet.has(EXPORT_CSV_COLUMNS.BALANCE_OVERRIDE)
 }
 
 /**
@@ -97,6 +111,11 @@ export function parseCryptoComCsv(file: File): Promise<CryptoComRow[]> {
           if (mapped.order && mapped.journalType && mapped.instrument) {
             rows.push(mapped as CryptoComRow)
           }
+        }
+
+        if (rows.length === 0) {
+          reject(new Error('This file is empty or not compatible with transaction import.'))
+          return
         }
 
         rows.sort((a, b) => {

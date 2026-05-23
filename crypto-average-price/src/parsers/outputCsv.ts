@@ -28,6 +28,11 @@ export function parseExportedCsv(file: File): Promise<{
           addExportedPtaxEntry(ptaxMap, parsed.ptaxEntry)
         }
 
+        if (transactions.length === 0) {
+          reject(new Error('This file is empty or not compatible with backup import.'))
+          return
+        }
+
         transactions.sort((a, b) => a.order - b.order)
         resolve({ transactions, ptaxMap })
       },

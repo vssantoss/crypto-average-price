@@ -6,9 +6,15 @@ interface EmptyStateProps {
   onImportTransactions: () => void
   onImportBackup: () => void
   isLoading?: boolean
+  error?: string | null
 }
 
-export function EmptyState({ onImportTransactions, onImportBackup, isLoading }: EmptyStateProps) {
+/**
+ * Renders the initial import screen and any import error raised before data is loaded.
+ * @param props - Import handlers, loading state, and optional error message
+ * @returns Empty-state import card
+ */
+export function EmptyState({ onImportTransactions, onImportBackup, isLoading, error }: EmptyStateProps) {
   if (isLoading) return <LoadingCard />
 
   return (
@@ -42,11 +48,21 @@ export function EmptyState({ onImportTransactions, onImportBackup, isLoading }: 
           <FolderInput size={14} />
           Import Backup
         </button>
+
+        {error && (
+          <div className="mt-4 bg-danger/10 border border-danger/30 rounded px-3 py-2 text-xs text-danger">
+            {error}
+          </div>
+        )}
       </div>
     </div>
   )
 }
 
+/**
+ * Renders the loading card shown while imports are being processed.
+ * @returns Loading card element
+ */
 export function LoadingCard() {
   return (
     <div className="h-full flex items-center justify-center p-6">
