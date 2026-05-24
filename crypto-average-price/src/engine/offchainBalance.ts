@@ -1,5 +1,5 @@
 import type { CryptoComRow } from '../types/transaction'
-import { JournalType, Wallet } from '../types/transaction'
+import { JournalType, OffchainSplitType, Wallet } from '../types/transaction'
 
 /**
  * Gets the wallet bucket for a row, defaulting imported rows to Trading Wallet.
@@ -18,6 +18,10 @@ function getWallet(row: CryptoComRow): Wallet {
 function getOffchainBalanceDelta(row: CryptoComRow): number {
   if (row.journalType === JournalType.OFFCHAIN_WITHDRAWAL) {
     return Math.abs(row.transactionQuantity)
+  }
+
+  if (row.journalType === JournalType.OFFCHAIN_DEPOSIT && row.offchainSplitType === OffchainSplitType.RETURN) {
+    return -Math.abs(row.transactionQuantity)
   }
 
   if (row.journalType === JournalType.OFFCHAIN_SALE) {

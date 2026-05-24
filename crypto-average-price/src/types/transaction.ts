@@ -12,6 +12,7 @@ export const JournalType = {
   ONCHAIN_WITHDRAWAL: 'ONCHAIN_WITHDRAWAL',
   CRYPTO_DUSTING: 'CRYPTO_DUSTING',
   MANUAL_UPDATE: 'MANUAL_UPDATE',
+  MANUAL_ADJUSTMENT: 'MANUAL_ADJUSTMENT',
 } as const
 
 export type JournalType = (typeof JournalType)[keyof typeof JournalType]
@@ -25,6 +26,16 @@ export const Wallet = {
 } as const
 
 export type Wallet = (typeof Wallet)[keyof typeof Wallet]
+
+/**
+ * Derived offchain deposit split roles used for display and calculation rows.
+ */
+export const OffchainSplitType = {
+  RETURN: 'return',
+  ACQUISITION: 'acquisition',
+} as const
+
+export type OffchainSplitType = (typeof OffchainSplitType)[keyof typeof OffchainSplitType]
 
 /**
  * Possible trade sides from the Crypto.com report.
@@ -70,6 +81,10 @@ export interface CryptoComRow {
   balanceOverride?: number
   /** User-provided note */
   info?: string
+  /** Original row order when this is a derived calculation/display row */
+  sourceOrder?: number
+  /** Role of a derived OFFCHAIN_DEPOSIT split row */
+  offchainSplitType?: OffchainSplitType
 }
 
 /**
@@ -79,6 +94,7 @@ export interface CryptoComRow {
 export interface ProcessedRow {
   id: string
   order: number
+  sourceOrder: number
   timeUtc: string
   eventDate: string
   journalType: JournalType
@@ -113,6 +129,7 @@ export interface ProcessedRow {
   tradeLinkSummary: string
   linkedFeeAmount: number | null
   linkedFeeInstrument: string
+  offchainSplitType: OffchainSplitType | null
   hasPtaxWarning: boolean
   hasBalanceOverride: boolean
   isEditable: {

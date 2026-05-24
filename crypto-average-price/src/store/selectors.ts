@@ -110,6 +110,27 @@ function buildOffchainBalanceDiagnostics(rows: ProcessedRow[]): string[] {
 }
 
 /**
+ * Finds deposit acquisition rows that still need a manual BRL cost.
+ * @param rows - Calculated rows with suppressed rows already filtered out
+ * @returns Deposit rows whose editable BRL transaction cost is missing
+ */
+function findDepositsWithoutBrlCost(rows: ProcessedRow[]): ProcessedRow[] {
+  const seenSourceOrders = new Set<number>()
+  const deposits: ProcessedRow[] = []
+
+  for (const row of rows) {
+    const isDepositRow = row.journalType === JournalType.OFFCHAIN_DEPOSIT || row.journalType === JournalType.ONCHAIN_DEPOSIT
+    if (!isDepositRow || !row.isEditable.brlCost || row.brlTransactionCost !== null) continue
+    if (seenSourceOrders.has(row.sourceOrder)) continue
+
+    deposits.push(row)
+    seenSourceOrders.add(row.sourceOrder)
+  }
+
+  return deposits
+}
+
+/**
  * Builds diagnostic messages from raw and processed transaction data.
  * @param rawTransactions - Raw transaction rows from the store
  * @param allProcessedRows - Computed rows for all instruments
@@ -135,9 +156,7 @@ function buildDiagnostics(
     }
   }
 
-  const depositsWithoutCost = rawTransactions.filter(
-    r => (r.journalType === 'OFFCHAIN_DEPOSIT' || r.journalType === 'ONCHAIN_DEPOSIT') && r.userBrlCost === undefined
-  )
+  const depositsWithoutCost = findDepositsWithoutBrlCost(calculatedRows)
   if (depositsWithoutCost.length > 0) {
     const firstDeposit = depositsWithoutCost[0]
     messages.push(`${depositsWithoutCost.length} deposit${depositsWithoutCost.length > 1 ? 's' : ''} without BRL cost. First missing row: ${firstDeposit.instrument} at ${firstDeposit.timeUtc}. Edit the BRL Tx Cost column on deposit rows to include the actual BRL amount paid.`)

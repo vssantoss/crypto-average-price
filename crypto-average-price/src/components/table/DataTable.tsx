@@ -74,11 +74,13 @@ type RowType = 'buy' | 'sell' | 'neutral'
 function getRowType(row: ProcessedRow): RowType {
   if (
     row.side === 'BUY' ||
+    (row.journalType === JournalType.MANUAL_ADJUSTMENT && row.transactionQuantity > 0) ||
     row.journalType === JournalType.OFFCHAIN_DEPOSIT ||
     row.journalType === JournalType.ONCHAIN_DEPOSIT
   ) return 'buy'
   if (
     row.side === 'SELL' ||
+    (row.journalType === JournalType.MANUAL_ADJUSTMENT && row.transactionQuantity < 0) ||
     row.journalType === JournalType.OFFCHAIN_SALE ||
     row.journalType === JournalType.ONCHAIN_WITHDRAWAL
   ) return 'sell'
@@ -452,7 +454,7 @@ export function DataTable({ data }: DataTableProps) {
         <tbody>
           {table.getRowModel().rows.map(row => {
             const original = row.original
-            const raw = rawByOrder.get(original.order)
+            const raw = rawByOrder.get(original.sourceOrder)
             const stickyBg = getStickyBodyBackground(original)
             const actionSticky = getActionColumnRenderState(
               actionColumnSticky,
@@ -479,7 +481,7 @@ export function DataTable({ data }: DataTableProps) {
                       <Pencil size={12} />
                     </button>
                     <button
-                      onClick={() => setDeleteOrder(original.order)}
+                      onClick={() => setDeleteOrder(original.sourceOrder)}
                       className="p-0 text-text-muted hover:text-danger transition-colors"
                       title="Delete row"
                     >
@@ -521,7 +523,7 @@ export function DataTable({ data }: DataTableProps) {
                       >
                         <EditableCell
                           value={original.info}
-                          onSave={val => setInfoEdit(original.order, val)}
+                          onSave={val => setInfoEdit(original.sourceOrder, val)}
                           placeholder="Add note..."
                           title={original.info || 'Click to edit'}
                         />
@@ -545,7 +547,7 @@ export function DataTable({ data }: DataTableProps) {
                           editPlaceholder={calculatedValue}
                           onSave={val => {
                             const num = parseFloat(val)
-                            setAvgPriceSeed(original.order, isNaN(num) ? null : num)
+                            setAvgPriceSeed(original.sourceOrder, isNaN(num) ? null : num)
                           }}
                           placeholder="Set avg price..."
                           className="justify-end text-right"
@@ -571,7 +573,7 @@ export function DataTable({ data }: DataTableProps) {
                           editPlaceholder={calculatedValue}
                           onSave={val => {
                             const num = parseFloat(val)
-                            setUsdAvgPriceSeed(original.order, isNaN(num) ? null : num)
+                            setUsdAvgPriceSeed(original.sourceOrder, isNaN(num) ? null : num)
                           }}
                           placeholder="Set USD avg..."
                           className="justify-end text-right"
@@ -598,7 +600,7 @@ export function DataTable({ data }: DataTableProps) {
                           editPlaceholder={calculatedValue}
                           onSave={val => {
                             const num = parseFloat(val)
-                            setBalanceOverride(original.order, isNaN(num) ? null : num)
+                            setBalanceOverride(original.sourceOrder, isNaN(num) ? null : num)
                           }}
                           placeholder=""
                           className="justify-end text-right"
@@ -625,7 +627,7 @@ export function DataTable({ data }: DataTableProps) {
                           editPlaceholder={calculatedValue}
                           onSave={val => {
                             const num = parseFloat(val)
-                            setUserBrlCost(original.order, isNaN(num) ? null : num)
+                            setUserBrlCost(original.sourceOrder, isNaN(num) ? null : num)
                           }}
                           placeholder="Enter BRL amount..."
                           className="justify-end text-right"
@@ -651,7 +653,7 @@ export function DataTable({ data }: DataTableProps) {
                           editPlaceholder={calculatedValue}
                           onSave={val => {
                             const num = parseFloat(val)
-                            setUserUsdCost(original.order, isNaN(num) ? null : num)
+                            setUserUsdCost(original.sourceOrder, isNaN(num) ? null : num)
                           }}
                           placeholder="Enter USD amount..."
                           className="justify-end text-right"

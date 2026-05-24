@@ -42,21 +42,13 @@ function hasStableId(value: string): boolean {
 }
 
 /**
- * Gets the preferred stable trade group ID for a row.
+ * Gets the fallback stable trade group ID for a row.
  * @param row - Transaction row to inspect
  * @returns Stable group key details, or null when no Crypto.com ID is present
  */
-function getStableTradeGroupKey(row: CryptoComRow): { key: string; displayId: string } | null {
+function getFallbackTradeGroupKey(row: CryptoComRow): { key: string; displayId: string } | null {
   if (hasStableId(row.tradeMatchId)) {
     return { key: `trade-match:${row.tradeMatchId}`, displayId: row.tradeMatchId }
-  }
-
-  if (hasStableId(row.orderId)) {
-    return { key: `order:${row.orderId}`, displayId: row.orderId }
-  }
-
-  if (hasStableId(row.tradeId)) {
-    return { key: `trade:${row.tradeId}`, displayId: row.tradeId }
   }
 
   if (hasStableId(row.clientOrderId)) {
@@ -64,6 +56,71 @@ function getStableTradeGroupKey(row: CryptoComRow): { key: string; displayId: st
   }
 
   return null
+}
+
+/**
+ * Checks whether rows form one exact trade pair.
+ * @param rows - Candidate grouped rows
+ * @returns True when the group has one BUY and one SELL across two instruments
+ */
+function isExactTwoLegTrade(rows: CryptoComRow[]): boolean {
+  const tradingRows = rows.filter(row => row.journalType === JournalType.TRADING && row.side !== null)
+  if (tradingRows.length !== 2) return false
+
+  const buys = tradingRows.filter(row => row.side === 'BUY')
+  const sells = tradingRows.filter(row => row.side === 'SELL')
+  const instruments = new Set(tradingRows.map(row => row.instrument))
+  return buys.length === 1 && sells.length === 1 && instruments.size === 2
+}
+
+/**
+ * Builds exact two-leg trade groups from a specific Crypto.com ID field.
+ * @param rows - Transaction rows to group
+ * @param field - Row field containing the grouping ID
+ * @param prefix - Internal key prefix for the generated groups
+ * @returns Exact trade groups keyed by the selected ID field
+ */
+function buildExactTradeGroupsByField(
+  rows: CryptoComRow[],
+  field: 'tradeId' | 'orderId',
+  prefix: string,
+): Map<string, TradeGroup> {
+  const groupRows = new Map<string, CryptoComRow[]>()
+
+  for (const row of rows) {
+    const id = row[field]
+    if (!hasStableId(id)) continue
+
+    const existing = groupRows.get(id)
+    if (existing) {
+      existing.push(row)
+    } else {
+      groupRows.set(id, [row])
+    }
+  }
+
+  const groups = new Map<string, TradeGroup>()
+  for (const [id, group] of groupRows) {
+    if (!isExactTwoLegTrade(group)) continue
+    groups.set(`${prefix}:${id}`, createTradeGroup(`${prefix}:${id}`, id, 'id', group))
+  }
+
+  return groups
+}
+
+/**
+ * Gets orders already claimed by higher-confidence trade groups.
+ * @param groups - Trade groups to inspect
+ * @returns Set of transaction order numbers already linked
+ */
+function getClaimedOrders(groups: Map<string, TradeGroup>): Set<number> {
+  const orders = new Set<number>()
+  for (const group of groups.values()) {
+    for (const row of group.rows) {
+      orders.add(row.order)
+    }
+  }
+  return orders
 }
 
 /**
@@ -163,10 +220,25 @@ function hasTradingLeg(group: TradeGroup): boolean {
  * @returns Explicit groups keyed by stable Crypto.com IDs
  */
 function buildExplicitTradeGroups(rows: CryptoComRow[]): Map<string, TradeGroup> {
+  const groups = buildExactTradeGroupsByField(rows, 'tradeId', 'trade')
+  const claimedByTradeId = getClaimedOrders(groups)
+  const orderGroups = buildExactTradeGroupsByField(
+    rows.filter(row => !claimedByTradeId.has(row.order)),
+    'orderId',
+    'order',
+  )
+
+  for (const [key, group] of orderGroups) {
+    groups.set(key, group)
+  }
+
+  const claimedOrders = getClaimedOrders(groups)
   const groupRows = new Map<string, { displayId: string; rows: CryptoComRow[] }>()
 
   for (const row of rows) {
-    const stableKey = getStableTradeGroupKey(row)
+    if (claimedOrders.has(row.order)) continue
+
+    const stableKey = getFallbackTradeGroupKey(row)
     if (!stableKey) continue
 
     const existing = groupRows.get(stableKey.key)
@@ -177,7 +249,6 @@ function buildExplicitTradeGroups(rows: CryptoComRow[]): Map<string, TradeGroup>
     }
   }
 
-  const groups = new Map<string, TradeGroup>()
   for (const [key, group] of groupRows) {
     const tradeGroup = createTradeGroup(key, group.displayId, 'id', group.rows)
     if (tradeGroup.rows.length > 1 && hasTradingLeg(tradeGroup)) {
@@ -278,7 +349,8 @@ function attachInferredFees(groups: TradeGroup[], rows: CryptoComRow[]): TradeGr
  */
 export function buildTradeLinkIndex(rows: CryptoComRow[]): TradeLinkIndex {
   const groups = buildExplicitTradeGroups(rows)
-  const rowsWithoutIds = rows.filter(row => !getStableTradeGroupKey(row))
+  const claimedOrders = getClaimedOrders(groups)
+  const rowsWithoutIds = rows.filter(row => !claimedOrders.has(row.order) && !getFallbackTradeGroupKey(row))
   const inferredGroups = attachInferredFees(
     buildInferredTradingGroups(rowsWithoutIds),
     rowsWithoutIds,

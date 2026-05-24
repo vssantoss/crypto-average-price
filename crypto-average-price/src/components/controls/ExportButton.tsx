@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import Papa from 'papaparse'
 import type { ProcessedRow } from '../../types/transaction'
 import { useAppStore } from '../../store/useAppStore'
-import { buildExportCsvRow, type ExportCsvOptions } from '../../parsers/exportSchema'
+import { buildExportCsvRow, buildRawExportCsvRow, type ExportCsvOptions } from '../../parsers/exportSchema'
 import { Dialog, DialogFooter, dialogCancelClass, dialogPrimaryClass, dialogSecondaryClass } from '../common/Dialog'
 import { usePromiseDialog } from '../../hooks/usePromiseDialog'
 import { Download, Save, X } from 'lucide-react'
@@ -45,7 +45,21 @@ interface ExportErrorDialog {
 function buildExportRows(data: ProcessedRow[], options?: ExportCsvOptions) {
   const rawTransactions = useAppStore.getState().rawTransactions
   const rawMap = new Map(rawTransactions.map(r => [r.order, r]))
-  return data.map(row => buildExportCsvRow(row, rawMap.get(row.order), options))
+
+  if (options?.includeCalculated) {
+    return data.map(row => buildExportCsvRow(row, rawMap.get(row.sourceOrder), options))
+  }
+
+  const seenSourceOrders = new Set<number>()
+  const backupRows = []
+  for (const row of data) {
+    if (seenSourceOrders.has(row.sourceOrder)) continue
+    const raw = rawMap.get(row.sourceOrder)
+    if (!raw) continue
+    backupRows.push(buildRawExportCsvRow(raw, row))
+    seenSourceOrders.add(row.sourceOrder)
+  }
+  return backupRows
 }
 
 /**

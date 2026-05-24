@@ -1,5 +1,5 @@
 import type { CryptoComRow, ProcessedRow } from '../types/transaction'
-import { JournalType, Wallet } from '../types/transaction'
+import { JournalType, OffchainSplitType, Wallet } from '../types/transaction'
 import type { PtaxMap } from '../types/ptax'
 import {
   buildTradeMatchIndex,
@@ -21,6 +21,9 @@ import {
   isUsdInstrument,
   isMergedUsdInternalTrade,
 } from './usdMerge'
+
+const SPLIT_ORDER_STEP = 0.01
+const QUANTITY_EPSILON = 0.00000001
 
 /**
  * Determines if a row represents a deposit that should have an editable BRL cost.
@@ -68,6 +71,51 @@ function getWallet(row: CryptoComRow): Wallet {
 }
 
 /**
+ * Checks whether a derived row represents the return portion of an offchain deposit.
+ * @param row - Transaction row to inspect
+ * @returns True when the row returns existing external holdings
+ */
+function isOffchainReturnDeposit(row: CryptoComRow): boolean {
+  return row.journalType === JournalType.OFFCHAIN_DEPOSIT && row.offchainSplitType === OffchainSplitType.RETURN
+}
+
+/**
+ * Checks whether a deposit row can represent a new acquisition.
+ * @param row - Transaction row to inspect
+ * @returns True when the deposit can accept acquisition cost
+ */
+function isCostEditableDeposit(row: CryptoComRow): boolean {
+  return isDeposit(row.journalType) && !isOffchainReturnDeposit(row)
+}
+
+/**
+ * Checks whether a row is a positive manual balance adjustment.
+ * @param row - Transaction row to inspect
+ * @returns True when the adjustment adds holdings
+ */
+function isPositiveManualAdjustment(row: CryptoComRow): boolean {
+  return row.journalType === JournalType.MANUAL_ADJUSTMENT && row.transactionQuantity > 0
+}
+
+/**
+ * Checks whether a row is a negative manual balance adjustment.
+ * @param row - Transaction row to inspect
+ * @returns True when the adjustment removes holdings
+ */
+function isNegativeManualAdjustment(row: CryptoComRow): boolean {
+  return row.journalType === JournalType.MANUAL_ADJUSTMENT && row.transactionQuantity < 0
+}
+
+/**
+ * Checks whether a row is any manual balance adjustment.
+ * @param row - Transaction row to inspect
+ * @returns True when the row is a manual adjustment
+ */
+function isManualAdjustment(row: CryptoComRow): boolean {
+  return row.journalType === JournalType.MANUAL_ADJUSTMENT
+}
+
+/**
  * Determines whether BRL transaction cost can be manually edited for a row.
  * @param row - Transaction row to inspect
  * @param tradeIndex - Trade match index built from original rows
@@ -82,7 +130,8 @@ function canEditBrlTransactionCost(
   if (isMergedUsdInternalTrade(row, tradeIndex, rows)) return false
 
   return (
-    isDeposit(row.journalType) ||
+    isCostEditableDeposit(row) ||
+    isManualAdjustment(row) ||
     isSaleOrWithdrawal(row) ||
     (row.journalType === JournalType.TRADING && row.side === 'BUY')
   )
@@ -104,11 +153,79 @@ function canEditUsdTransactionCost(
   if (isMergedUsdInternalTrade(row, tradeIndex, rows)) return false
 
   return (
-    isDeposit(row.journalType) ||
+    isCostEditableDeposit(row) ||
+    isManualAdjustment(row) ||
     isWithdrawalDisposition(row.journalType) ||
     (row.journalType === JournalType.TRADING && row.side === 'SELL') ||
     (row.journalType === JournalType.TRADING && row.side === 'BUY')
   )
+}
+
+/**
+ * Builds a derived offchain deposit split row with adjusted quantity and source order.
+ * @param row - Original offchain deposit row
+ * @param quantity - Quantity assigned to this split row
+ * @param splitType - Split role for the derived row
+ * @param orderOffset - Fractional order offset used to keep split rows stable
+ * @returns Derived transaction row for calculation and display
+ */
+function createOffchainDepositSplitRow(
+  row: CryptoComRow,
+  quantity: number,
+  splitType: OffchainSplitType,
+  orderOffset: number,
+): CryptoComRow {
+  return {
+    ...row,
+    order: row.order + orderOffset,
+    sourceOrder: row.sourceOrder ?? row.order,
+    transactionQuantity: quantity,
+    transactionCost: quantity,
+    offchainSplitType: splitType,
+  }
+}
+
+/**
+ * Derives offchain deposit split rows based on external balance available before each deposit.
+ * @param rows - Normalized instrument rows sorted chronologically
+ * @returns Rows with return/acquisition portions split for calculation and display
+ */
+function createOffchainSplitRows(rows: CryptoComRow[]): CryptoComRow[] {
+  const result: CryptoComRow[] = []
+  let externalBalance = 0
+
+  for (const row of rows) {
+    const quantity = row.transactionQuantity
+
+    if (row.journalType === JournalType.OFFCHAIN_DEPOSIT && quantity > QUANTITY_EPSILON) {
+      const returnQuantity = Math.min(quantity, Math.max(externalBalance, 0))
+      const acquisitionQuantity = quantity - returnQuantity
+
+      if (returnQuantity > QUANTITY_EPSILON && acquisitionQuantity > QUANTITY_EPSILON) {
+        result.push(createOffchainDepositSplitRow(row, returnQuantity, OffchainSplitType.RETURN, SPLIT_ORDER_STEP))
+        result.push(createOffchainDepositSplitRow(row, acquisitionQuantity, OffchainSplitType.ACQUISITION, SPLIT_ORDER_STEP * 2))
+      } else if (returnQuantity > QUANTITY_EPSILON) {
+        result.push(createOffchainDepositSplitRow(row, quantity, OffchainSplitType.RETURN, 0))
+      } else {
+        result.push({ ...row, sourceOrder: row.sourceOrder ?? row.order })
+      }
+
+      externalBalance -= returnQuantity
+      continue
+    }
+
+    result.push({ ...row, sourceOrder: row.sourceOrder ?? row.order })
+
+    if (row.journalType === JournalType.OFFCHAIN_WITHDRAWAL) {
+      externalBalance += Math.abs(row.transactionQuantity)
+    } else if (row.journalType === JournalType.OFFCHAIN_SALE) {
+      externalBalance -= Math.abs(row.transactionQuantity)
+    } else if (getWallet(row) === Wallet.EXTERNAL) {
+      externalBalance += row.transactionQuantity
+    }
+  }
+
+  return result
 }
 
 /**
@@ -118,7 +235,7 @@ function canEditUsdTransactionCost(
  */
 function createCostBasisRows(rows: CryptoComRow[]): CryptoComRow[] {
   return rows.map(row => {
-    if (row.journalType === JournalType.OFFCHAIN_WITHDRAWAL) {
+    if (row.journalType === JournalType.OFFCHAIN_WITHDRAWAL || isOffchainReturnDeposit(row)) {
       return { ...row, transactionQuantity: 0 }
     }
 
@@ -262,6 +379,8 @@ function getBrlAcquisitionCost(
   ptaxMap: PtaxMap,
   stablecoinAvgBeforeByOrder: Map<number, number>,
 ): number | null {
+  if (isOffchainReturnDeposit(row)) return null
+
   if (row.journalType === JournalType.TRADING && row.side === 'BUY') {
     if (row.userBrlCost !== undefined) return row.userBrlCost
 
@@ -272,6 +391,16 @@ function getBrlAcquisitionCost(
 
     const ptaxRate = lookupPtaxRate(row.eventDate, ptaxMap)
     return computeLinkedUsdBuyCost(row, ptaxRate, context.tradeLinkIndex)
+  }
+
+  if (isPositiveManualAdjustment(row)) {
+    if (row.userBrlCost !== undefined) return row.userBrlCost
+    return null
+  }
+
+  if (isNegativeManualAdjustment(row)) {
+    if (row.userBrlCost !== undefined) return row.userBrlCost
+    return null
   }
 
   if (isDeposit(row.journalType)) {
@@ -290,10 +419,21 @@ function getBrlAcquisitionCost(
  */
 function getUsdAcquisitionCost(row: CryptoComRow, context: AveragePriceContext): number | null {
   if (isUsdInstrument(row.instrument)) return null
+  if (isOffchainReturnDeposit(row)) return null
 
   if (row.journalType === JournalType.TRADING && row.side === 'BUY') {
     if (row.userUsdCost !== undefined) return row.userUsdCost
     return getLinkedUsdAmount(row, 'SELL', context.tradeLinkIndex)
+  }
+
+  if (isPositiveManualAdjustment(row)) {
+    if (row.userUsdCost !== undefined) return row.userUsdCost
+    return null
+  }
+
+  if (isNegativeManualAdjustment(row)) {
+    if (row.userUsdCost !== undefined) return row.userUsdCost
+    return null
   }
 
   if (isDeposit(row.journalType)) {
@@ -438,6 +578,22 @@ interface InstrumentComputation {
 }
 
 /**
+ * Builds display text for a processed row, adding split labels for derived offchain deposits.
+ * @param row - Derived transaction row being processed
+ * @returns User-facing info text for the row
+ */
+function getProcessedInfo(row: CryptoComRow): string {
+  const info = row.info || ''
+  if (row.offchainSplitType === OffchainSplitType.RETURN) {
+    return info ? `Return from External - ${info}` : 'Return from External'
+  }
+  if (row.offchainSplitType === OffchainSplitType.ACQUISITION) {
+    return info ? `Offline Acquisition - ${info}` : 'Offline Acquisition'
+  }
+  return info
+}
+
+/**
  * Main computation orchestrator.
  * Takes raw transactions and PTAX data, reads overrides from the rows themselves,
  * and produces fully processed rows with all computed columns.
@@ -473,7 +629,7 @@ export function computeAllColumns(
   const stablecoinAvgBeforeByOrder = new Map<number, number>()
 
   for (const inst of instruments) {
-    const instrumentRows = normalizedRows.filter(r => r.instrument === inst)
+    const instrumentRows = createOffchainSplitRows(normalizedRows.filter(r => r.instrument === inst))
     if (instrumentRows.length === 0) continue
 
     const runningBalances = calculateRunningBalances(instrumentRows)
@@ -496,7 +652,7 @@ export function computeAllColumns(
       for (let i = 0; i < instrumentRows.length; i++) {
         const avgBefore = initialBrlResults[i].avgPriceBefore
         if (avgBefore !== null && avgBefore > 0) {
-          stablecoinAvgBeforeByOrder.set(instrumentRows[i].order, avgBefore)
+          stablecoinAvgBeforeByOrder.set(instrumentRows[i].sourceOrder ?? instrumentRows[i].order, avgBefore)
         }
       }
     }
@@ -544,6 +700,7 @@ export function computeAllColumns(
 
     for (let i = 0; i < instrumentRows.length; i++) {
       const row = instrumentRows[i]
+      const sourceOrder = row.sourceOrder ?? row.order
       const balance = computation.runningBalances[i]
       const offchainBalance = computation.offchainBalances[i]
       const avgResult = computation.brlResults[i]
@@ -578,7 +735,7 @@ export function computeAllColumns(
         instrumentRows,
       )
 
-      const originalRow = rawByOrder.get(row.order)
+      const originalRow = rawByOrder.get(sourceOrder)
       const originalInstrument = originalRow?.instrument || row.instrument
       const tradeLink = getTradeLinkMetadata(originalRow || row, tradeLinkIndex)
       const tradeFeeQuantity = getLinkedTradeFeeQuantity(originalRow || row, tradeLinkIndex)
@@ -586,8 +743,9 @@ export function computeAllColumns(
       const suppressCalculatedFields = isFoldedTradeFeeRow(originalRow || row, tradeLinkIndex)
 
       const processed: ProcessedRow = {
-        id: `${row.order}-${row.instrument}`,
+        id: `${row.order}-${row.instrument}-${row.offchainSplitType ?? 'base'}`,
         order: row.order,
+        sourceOrder,
         timeUtc: row.timeUtc,
         eventDate: row.eventDate,
         journalType: row.journalType,
@@ -613,7 +771,7 @@ export function computeAllColumns(
         brlCostRate,
         precoMedioCompra: avgResult.avgPrice,
         totalLucroPrejuizo: profitLoss,
-        info: row.info || '',
+        info: getProcessedInfo(row),
         suppressCalculatedFields,
         isTradeLinked: tradeLink.isLinked,
         isLinkedTradeFee: tradeLink.isFee,
@@ -622,6 +780,7 @@ export function computeAllColumns(
         tradeLinkSummary: tradeLink.summary,
         linkedFeeAmount: tradeLink.feeAmount,
         linkedFeeInstrument: tradeLink.feeInstrument,
+        offchainSplitType: row.offchainSplitType ?? null,
         hasPtaxWarning: false,
         hasBalanceOverride: row.balanceOverride !== undefined,
         isEditable: {

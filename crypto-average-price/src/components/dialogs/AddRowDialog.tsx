@@ -5,7 +5,7 @@ import { JournalType, Wallet } from '../../types/transaction'
 import type { CryptoComRow, TradeSide } from '../../types/transaction'
 import { parseCryptoComDate } from '../../utils/date'
 import { Dialog, DialogFooter, dialogCancelClass, dialogPrimaryClass } from '../common/Dialog'
-import { X } from 'lucide-react'
+import { Info, X } from 'lucide-react'
 
 interface AddRowDialogProps {
   open: boolean
@@ -141,6 +141,15 @@ function isManualUpdate(journalType: JournalType): boolean {
 }
 
 /**
+ * Checks whether a journal type manually adds or removes balance.
+ * @param journalType - Journal type selected in the form
+ * @returns True when the row should apply a signed quantity delta
+ */
+function isManualAdjustment(journalType: JournalType): boolean {
+  return journalType === JournalType.MANUAL_ADJUSTMENT
+}
+
+/**
  * Checks whether a journal type is a manual sale from offchain holdings.
  * @param journalType - Journal type selected in the form
  * @returns True when the row should consume external balance and use BRL proceeds
@@ -244,10 +253,13 @@ function AddRowDialogContent({ open, onClose, editRow }: AddRowDialogProps) {
   const isEdit = !!editRow
   const dateValid = isValidDate(timeUtc)
   const manualUpdate = isManualUpdate(journalType)
+  const manualAdjustment = isManualAdjustment(journalType)
   const offchainSale = isOffchainSale(journalType)
   const offchainWithdrawal = isOffchainWithdrawal(journalType)
+  const quantityNumber = parseFloat(quantity)
   const balanceOverrideNumber = parseFloat(balanceOverride)
   const balanceOverrideValid = !manualUpdate || (balanceOverride.trim() !== '' && !Number.isNaN(balanceOverrideNumber))
+  const adjustmentQuantityValid = !manualAdjustment || (quantity.trim() !== '' && !Number.isNaN(quantityNumber) && quantityNumber !== 0)
   const userBrlCostNumber = parseFloat(userBrlCost)
 
   /**
@@ -258,11 +270,12 @@ function AddRowDialogContent({ open, onClose, editRow }: AddRowDialogProps) {
     const normalized = normalizeTo24h(timeUtc)
     const normalizedExchange = exchangeName.trim()
     const nextWallet = offchainSale ? Wallet.EXTERNAL : manualUpdate || offchainWithdrawal ? Wallet.TRADING : wallet
-    const nextBalanceOverride = manualUpdate ? balanceOverrideNumber : editRow?.balanceOverride
+    const nextBalanceOverride = manualUpdate ? balanceOverrideNumber : manualAdjustment ? undefined : editRow?.balanceOverride
     const nextQuantity = offchainSale
       ? -Math.abs(parseFloat(quantity) || 0)
       : parseFloat(quantity) || 0
-    const nextUserBrlCost = offchainSale && userBrlCost.trim() !== '' && !Number.isNaN(userBrlCostNumber)
+    const canStoreUserBrlCost = offchainSale || manualAdjustment
+    const nextUserBrlCost = canStoreUserBrlCost && userBrlCost.trim() !== '' && !Number.isNaN(userBrlCostNumber)
       ? userBrlCostNumber
       : undefined
 
@@ -279,14 +292,14 @@ function AddRowDialogContent({ open, onClose, editRow }: AddRowDialogProps) {
         exchangeName: normalizedExchange || undefined,
         wallet: nextWallet,
         instrument: normalizeInstrumentInput(instrument),
-        takerSide: manualUpdate || offchainSale ? '' : takerSide.trim(),
-        side: manualUpdate || offchainSale ? null : side,
+        takerSide: manualUpdate || manualAdjustment || offchainSale ? '' : takerSide.trim(),
+        side: manualUpdate || manualAdjustment || offchainSale ? null : side,
         transactionQuantity: manualUpdate ? 0 : nextQuantity,
-        transactionCost: manualUpdate || offchainSale ? 0 : parseFloat(cost) || 0,
+        transactionCost: manualUpdate || offchainSale ? 0 : manualAdjustment ? nextQuantity : parseFloat(cost) || 0,
         balanceOverride: nextBalanceOverride,
-        userBrlCost: offchainSale
+        userBrlCost: canStoreUserBrlCost
           ? nextUserBrlCost
-          : editRow?.journalType === JournalType.OFFCHAIN_SALE
+          : editRow?.journalType === JournalType.OFFCHAIN_SALE || editRow?.journalType === JournalType.MANUAL_ADJUSTMENT
             ? undefined
             : editRow?.userBrlCost,
       })
@@ -301,10 +314,10 @@ function AddRowDialogContent({ open, onClose, editRow }: AddRowDialogProps) {
         exchangeName: normalizedExchange || undefined,
         wallet: nextWallet,
         instrument: normalizeInstrumentInput(instrument),
-        takerSide: manualUpdate || offchainSale ? '' : takerSide.trim(),
-        side: manualUpdate || offchainSale ? null : side,
+        takerSide: manualUpdate || manualAdjustment || offchainSale ? '' : takerSide.trim(),
+        side: manualUpdate || manualAdjustment || offchainSale ? null : side,
         transactionQuantity: manualUpdate ? 0 : nextQuantity,
-        transactionCost: manualUpdate || offchainSale ? 0 : parseFloat(cost) || 0,
+        transactionCost: manualUpdate || offchainSale ? 0 : manualAdjustment ? nextQuantity : parseFloat(cost) || 0,
         usdBalance: 0,
         realizedPnl: 0,
         orderId: '',
@@ -312,7 +325,7 @@ function AddRowDialogContent({ open, onClose, editRow }: AddRowDialogProps) {
         tradeMatchId: '',
         clientOrderId: '',
         balanceOverride: manualUpdate ? balanceOverrideNumber : undefined,
-        userBrlCost: offchainSale ? nextUserBrlCost : undefined,
+        userBrlCost: canStoreUserBrlCost ? nextUserBrlCost : undefined,
       }
       addManualRow(row)
     }
@@ -374,6 +387,11 @@ function AddRowDialogContent({ open, onClose, editRow }: AddRowDialogProps) {
                     setWallet(Wallet.TRADING)
                     setSide(null)
                     setQuantity('')
+                    setCost('')
+                    setTakerSide('')
+                  }
+                  if (isManualAdjustment(nextJournalType)) {
+                    setSide(null)
                     setCost('')
                     setTakerSide('')
                   }
@@ -467,6 +485,51 @@ function AddRowDialogContent({ open, onClose, editRow }: AddRowDialogProps) {
                 />
               </label>
             </div>
+          ) : manualAdjustment ? (
+            <div className="grid grid-cols-2 gap-3">
+              <label className="flex flex-col gap-1">
+                <span className="text-xs text-text-secondary">Signed Quantity</span>
+                <input
+                  type="text"
+                  value={quantity}
+                  onChange={e => setQuantity(e.target.value)}
+                  placeholder="0.00"
+                  className={`bg-surface-2 border rounded px-2.5 py-1.5 text-xs text-text-primary outline-none placeholder:text-text-muted ${
+                    !adjustmentQuantityValid ? 'border-danger focus:border-danger' : 'border-border focus:border-accent/50'
+                  }`}
+                />
+                {!adjustmentQuantityValid && (
+                  <span className="text-[10px] text-danger">Enter a non-zero signed quantity</span>
+                )}
+              </label>
+
+              <label className="flex flex-col gap-1">
+                <span className="flex items-center gap-1 text-xs text-text-secondary">
+                  BRL Cost Basis Amount
+                  <span className="group relative inline-flex">
+                    <Info
+                      size={13}
+                      className="text-text-muted"
+                      aria-label="Manual adjustment BRL cost basis help"
+                    />
+                    <span className="pointer-events-none absolute left-1/2 top-5 z-[70] hidden w-72 -translate-x-1/2 rounded border border-border bg-surface-1 px-2.5 py-2 text-left text-[11px] leading-4 text-text-secondary shadow-lg group-hover:block">
+                      <span className="block">Positive quantity: enter acquisition cost, or 0 for zero-cost dust.</span>
+                      <span className="mt-1 block">Negative quantity blank: removes proportional cost basis.</span>
+                      <span className="block">Negative quantity 0: changes balance only.</span>
+                      <span className="block">Negative quantity positive amount: removes exactly that BRL amount.</span>
+                      <span className="mt-1 block">Manual adjustments do not create profit/loss.</span>
+                    </span>
+                  </span>
+                </span>
+                <input
+                  type="text"
+                  value={userBrlCost}
+                  onChange={e => setUserBrlCost(e.target.value)}
+                  placeholder="0.00"
+                  className="bg-surface-2 border border-border rounded px-2.5 py-1.5 text-xs text-text-primary outline-none focus:border-accent/50 placeholder:text-text-muted"
+                />
+              </label>
+            </div>
           ) : (
             <>
               <div className="grid grid-cols-2 gap-3">
@@ -531,7 +594,7 @@ function AddRowDialogContent({ open, onClose, editRow }: AddRowDialogProps) {
           </button>
           <button
             onClick={() => handleSave()}
-            disabled={!instrument.trim() || !dateValid || !balanceOverrideValid}
+            disabled={!instrument.trim() || !dateValid || !balanceOverrideValid || !adjustmentQuantityValid}
             className={dialogPrimaryClass}
           >
             {isEdit ? 'Save' : 'Add'}
