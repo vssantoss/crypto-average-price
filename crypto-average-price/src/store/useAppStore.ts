@@ -89,6 +89,7 @@ export const defaultColumnLayout: TableLayoutSettings = {
     eventDate: false,
     wallet: false,
     takerSide: false,
+    tradeFeeQuantity: false,
     transactionCost: false,
     exchangeName: false,
     sourceFileName: false,
