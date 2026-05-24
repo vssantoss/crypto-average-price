@@ -3,6 +3,7 @@ import Papa from 'papaparse'
 import type { ProcessedRow } from '../../types/transaction'
 import { useAppStore } from '../../store/useAppStore'
 import { buildExportCsvRow, buildRawExportCsvRow, type ExportCsvOptions } from '../../parsers/exportSchema'
+import { buildSettingsConfigRows } from '../../parsers/settingsConfigCsv'
 import { Dialog, DialogFooter, dialogCancelClass, dialogPrimaryClass, dialogSecondaryClass } from '../common/Dialog'
 import { usePromiseDialog } from '../../hooks/usePromiseDialog'
 import { Download, Save, X } from 'lucide-react'
@@ -36,30 +37,42 @@ interface ExportErrorDialog {
   message: string
 }
 
+interface BuildExportRowsOptions extends ExportCsvOptions {
+  includeSettings?: boolean
+}
+
 /**
  * Builds output CSV rows from processed table rows.
  * @param data - Processed rows selected for export
- * @param options - Export options (e.g. whether to include calculated columns)
+ * @param options - Export options, including calculated columns and app settings
  * @returns Plain objects ready for PapaParse CSV serialization
  */
-function buildExportRows(data: ProcessedRow[], options?: ExportCsvOptions) {
-  const rawTransactions = useAppStore.getState().rawTransactions
+function buildExportRows(data: ProcessedRow[], options?: BuildExportRowsOptions) {
+  const { rawTransactions, settings } = useAppStore.getState()
   const rawMap = new Map(rawTransactions.map(r => [r.order, r]))
+  const rows: Array<Record<string, string | number>> = []
 
   if (options?.includeCalculated) {
-    return data.map(row => buildExportCsvRow(row, rawMap.get(row.sourceOrder), options))
+    rows.push(...data.map(row => buildExportCsvRow(row, rawMap.get(row.sourceOrder), options)))
+  } else {
+    const seenSourceOrders = new Set<number>()
+    for (const row of data) {
+      if (seenSourceOrders.has(row.sourceOrder)) continue
+      const raw = rawMap.get(row.sourceOrder)
+      if (!raw) continue
+      rows.push(buildRawExportCsvRow(raw, row))
+      seenSourceOrders.add(row.sourceOrder)
+    }
   }
 
-  const seenSourceOrders = new Set<number>()
-  const backupRows = []
-  for (const row of data) {
-    if (seenSourceOrders.has(row.sourceOrder)) continue
-    const raw = rawMap.get(row.sourceOrder)
-    if (!raw) continue
-    backupRows.push(buildRawExportCsvRow(raw, row))
-    seenSourceOrders.add(row.sourceOrder)
+  if (options?.includeSettings && rows.length > 0) {
+    return [
+      ...buildSettingsConfigRows(settings, Object.keys(rows[0])),
+      ...rows,
+    ]
   }
-  return backupRows
+
+  return rows
 }
 
 /**
@@ -212,6 +225,7 @@ export function ExportButton({ data, allData }: ExportButtonProps) {
   const [lastExportFilename, setLastExportFilename] = useState<string | null>(null)
   const [keepUpdated, setKeepUpdated] = useState(false)
   const [includeCalculated, setIncludeCalculated] = useState(false)
+  const [includeSettings, setIncludeSettings] = useState(false)
   const [liveMode, setLiveMode] = useState<LiveExportMode | null>(null)
   const [liveHandle, setLiveHandle] = useState<SaveFileHandle | null>(null)
   const [liveStatus, setLiveStatus] = useState('')
@@ -219,6 +233,8 @@ export function ExportButton({ data, allData }: ExportButtonProps) {
   const liveWritePending = useRef(false)
   const activeTableFilters = useAppStore(s => s.activeTableFilters)
   const activeTableRowOrders = useAppStore(s => s.activeTableRowOrders)
+  const backupImportHasSettingsConfig = useAppStore(s => s.backupImportHasSettingsConfig)
+  const settings = useAppStore(s => s.settings)
   const dataByOrder = useMemo(() => new Map(data.map(row => [row.order, row])), [data])
   const currentData = useMemo(() => {
     if (!activeTableRowOrders) return data
@@ -269,7 +285,7 @@ export function ExportButton({ data, allData }: ExportButtonProps) {
       setLiveStatus('Saving...')
 
       try {
-        await writeCsvToHandle(handle, buildExportRows(liveRows, { includeCalculated }))
+        await writeCsvToHandle(handle, buildExportRows(liveRows, { includeCalculated, includeSettings }))
         if (!cancelled) setLiveStatus('Saved')
       } catch (err) {
         if (!cancelled) {
@@ -297,7 +313,7 @@ export function ExportButton({ data, allData }: ExportButtonProps) {
       cancelled = true
       window.clearTimeout(timeout)
     }
-  }, [liveRows, liveHandle, liveMode, includeCalculated])
+  }, [liveRows, liveHandle, liveMode, includeCalculated, includeSettings, settings])
 
   /**
    * Builds the default export filename from current filter context.
@@ -375,7 +391,7 @@ export function ExportButton({ data, allData }: ExportButtonProps) {
     filename: string,
     forceKeepUpdated = false,
   ): Promise<void> {
-    const rowsToExport = buildExportRows(rows, { includeCalculated })
+    const rowsToExport = buildExportRows(rows, { includeCalculated, includeSettings })
 
     if (!keepUpdated && !forceKeepUpdated) {
       const savedFilename = await saveCsvFile(rowsToExport, filename, requestFallbackFilename)
@@ -413,6 +429,7 @@ export function ExportButton({ data, allData }: ExportButtonProps) {
    */
   function handleExport(): void {
     if (allData.length === 0) return
+    if (backupImportHasSettingsConfig) setIncludeSettings(true)
     setShowModal(true)
   }
 
@@ -584,6 +601,16 @@ export function ExportButton({ data, allData }: ExportButtonProps) {
           )}
 
           <div className="flex flex-col gap-2 mb-4">
+            <label className="flex items-center gap-2 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={includeSettings}
+                onChange={e => setIncludeSettings(e.target.checked)}
+                className="h-3.5 w-3.5 accent-accent"
+              />
+              <span className="text-xs text-text-secondary">Include app settings</span>
+            </label>
+
             <label className="flex items-center gap-2 cursor-pointer select-none">
               <input
                 type="checkbox"

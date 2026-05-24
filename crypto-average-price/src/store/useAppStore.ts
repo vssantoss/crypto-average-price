@@ -6,7 +6,8 @@ import { parseCryptoComCsv } from '../parsers/cryptoCom'
 import { parsePtaxCsv, mergePtaxMaps } from '../parsers/ptax'
 import { parseExportedCsv } from '../parsers/outputCsv'
 import { saveSession } from '../utils/localStorage'
-import { createDefaultUsdAssetGroup, normalizeAssetGroups } from '../engine/assetGroups'
+import { defaultColumnLayout, defaultSettings, normalizeAppSettings } from '../utils/appSettings'
+import { normalizeAssetGroups } from '../engine/assetGroups'
 
 interface TransactionFileImport {
   file: File
@@ -48,6 +49,7 @@ interface AppState {
   tableLayoutPreview: TableLayoutSettings | null
   activeTableFilters: ActiveTableFilter[]
   activeTableRowOrders: number[] | null
+  backupImportHasSettingsConfig: boolean
   isLoading: boolean
   error: string | null
 
@@ -81,33 +83,7 @@ interface AppState {
   clearAll: () => void
 }
 
-/**
- * Default datatable column layout.
- */
-export const defaultColumnLayout: TableLayoutSettings = {
-  columnVisibility: {
-    order: false,
-    eventDate: false,
-    wallet: false,
-    takerSide: false,
-    tradeFeeQuantity: false,
-    transactionCost: false,
-    exchangeName: false,
-    sourceFileName: false,
-  },
-  stickyColumns: [],
-}
-
-/**
- * Default settings.
- */
-const defaultSettings: AppSettings = {
-  assetGroups: [createDefaultUsdAssetGroup()],
-  ...defaultColumnLayout,
-  timezoneOffset: 0,
-  roundBalance: false,
-  panelExpanded: false,
-}
+export { defaultColumnLayout }
 
 /**
  * Parses a timeUtc string into milliseconds for efficient sorting.
@@ -159,37 +135,6 @@ function getTransactionDuplicateKey(row: CryptoComRow): string {
     row.side,
     row.transactionCost,
   ].map(normalizeDuplicateValue).join('|')
-}
-
-/**
- * Restores asset groups from saved settings and migrates the removed USD merge toggle into a rule.
- * @param settings - Saved app settings from localStorage
- * @returns Normalized asset groups for the current settings schema
- */
-function restoreAssetGroups(settings: AppSettings & { usdMergeEnabled?: boolean }): AssetGroup[] {
-  const restoredGroups = settings.assetGroups
-  const hasSavedGroups = Array.isArray(restoredGroups)
-  const defaultUsdGroup = createDefaultUsdAssetGroup()
-
-  if (!hasSavedGroups) {
-    return settings.usdMergeEnabled === false ? [] : [defaultUsdGroup]
-  }
-
-  const groups = restoredGroups
-
-  if (settings.usdMergeEnabled === false) {
-    return normalizeAssetGroups(groups)
-  }
-
-  const hasUsdGroup = groups.some(group =>
-    group.assetName.trim().toUpperCase() === defaultUsdGroup.assetName.toUpperCase()
-  )
-
-  if (settings.usdMergeEnabled === true && !hasUsdGroup) {
-    return normalizeAssetGroups([defaultUsdGroup, ...groups])
-  }
-
-  return normalizeAssetGroups(groups)
 }
 
 /**
@@ -253,6 +198,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
   tableLayoutPreview: null,
   activeTableFilters: [],
   activeTableRowOrders: null,
+  backupImportHasSettingsConfig: false,
   isLoading: false,
   error: null,
 
@@ -335,18 +281,23 @@ export const useAppStore = create<AppState>()((set, get) => ({
   async importExported(file: File) {
     set({ isLoading: true, error: null })
     try {
-      const { transactions, ptaxMap, assetGroups, hasAssetData } = await parseExportedCsv(file)
+      const { transactions, ptaxMap, assetGroups, hasAssetData, settings, hasAssetGroupsConfig } = await parseExportedCsv(file)
       set(state => {
         const mergedPtax = new Map(state.ptaxMap)
         for (const [date, rate] of ptaxMap) {
           mergedPtax.set(date, rate)
         }
+        const restoredSettings = settings
+          ? normalizeAppSettings(settings, state.settings)
+          : state.settings
+        const nextSettings = !hasAssetGroupsConfig && hasAssetData
+          ? normalizeAppSettings({ assetGroups }, restoredSettings)
+          : restoredSettings
         return {
           rawTransactions: transactions,
           ptaxMap: mergedPtax,
-          settings: hasAssetData
-            ? { ...state.settings, assetGroups }
-            : state.settings,
+          settings: nextSettings,
+          backupImportHasSettingsConfig: settings !== null,
           isLoading: false,
         }
       })
@@ -507,22 +458,8 @@ export const useAppStore = create<AppState>()((set, get) => ({
       rawTransactions: restored.rawTransactions,
       ptaxMap: restored.ptaxMap,
       tableLayoutPreview: null,
-      settings: {
-        ...defaultSettings,
-        ...restored.settings,
-        assetGroups: restoreAssetGroups(restored.settings),
-        columnVisibility: {
-          ...defaultSettings.columnVisibility,
-          ...restored.settings.columnVisibility,
-        },
-        stickyColumns: getVisibleStickyColumns(
-          restored.settings.stickyColumns ?? defaultSettings.stickyColumns,
-          {
-            ...defaultSettings.columnVisibility,
-            ...restored.settings.columnVisibility,
-          },
-        ),
-      },
+      backupImportHasSettingsConfig: false,
+      settings: normalizeAppSettings(restored.settings),
     })
   },
 
@@ -534,6 +471,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
       tableLayoutPreview: null,
       activeTableFilters: [],
       activeTableRowOrders: null,
+      backupImportHasSettingsConfig: false,
       error: null,
     })
     pendingState = get()

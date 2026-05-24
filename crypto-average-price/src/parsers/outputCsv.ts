@@ -1,9 +1,10 @@
 import Papa from 'papaparse'
 import type { CryptoComRow } from '../types/transaction'
 import type { PtaxMap } from '../types/ptax'
-import type { AssetGroup } from '../types/app'
+import type { AppSettings, AssetGroup } from '../types/app'
 import { buildAssetGroupsFromPairs } from '../engine/assetGroups'
 import { EXPORT_CSV_COLUMNS, addExportedPtaxEntry, parseExportedCsvRow } from './exportSchema'
+import { isSettingsConfigRow, parseSettingsConfigRows } from './settingsConfigCsv'
 
 /**
  * Parses a previously exported CSV to recover raw transactions with embedded overrides and PTAX rates.
@@ -16,6 +17,8 @@ export function parseExportedCsv(file: File): Promise<{
   ptaxMap: PtaxMap
   assetGroups: AssetGroup[]
   hasAssetData: boolean
+  settings: Partial<AppSettings> | null
+  hasAssetGroupsConfig: boolean
 }> {
   return new Promise((resolve, reject) => {
     Papa.parse(file, {
@@ -27,8 +30,11 @@ export function parseExportedCsv(file: File): Promise<{
         const assetPairs: Array<{ asset: string; instrument: string }> = []
         const fields = results.meta.fields ?? []
         const hasAssetData = fields.includes(EXPORT_CSV_COLUMNS.ASSET)
+        const settingsConfig = parseSettingsConfigRows(results.data as Record<string, string>[])
 
         for (const rawRow of results.data as Record<string, string>[]) {
+          if (isSettingsConfigRow(rawRow)) continue
+
           const parsed = parseExportedCsvRow(rawRow)
           if (!parsed.transaction) continue
           transactions.push(parsed.transaction)
@@ -51,6 +57,8 @@ export function parseExportedCsv(file: File): Promise<{
           ptaxMap,
           assetGroups: buildAssetGroupsFromPairs(assetPairs),
           hasAssetData,
+          settings: settingsConfig.hasAnySettings ? settingsConfig.settings : null,
+          hasAssetGroupsConfig: settingsConfig.hasAssetGroups,
         })
       },
       error(err) {
