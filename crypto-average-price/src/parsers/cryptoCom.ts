@@ -32,7 +32,7 @@ const COLUMN_MAP: Record<string, keyof CryptoComRow> = {
  */
 export function hasBackupCsvHeaders(fields: string[]): boolean {
   const headerSet = new Set(fields.map(field => field.trim()))
-  return headerSet.has(EXPORT_CSV_COLUMNS.ORIGINAL_INSTRUMENT) ||
+  return headerSet.has(EXPORT_CSV_COLUMNS.ASSET) ||
     headerSet.has(EXPORT_CSV_COLUMNS.AVG_PRICE_SEED) ||
     headerSet.has(EXPORT_CSV_COLUMNS.USER_BRL_COST) ||
     headerSet.has(EXPORT_CSV_COLUMNS.BALANCE_OVERRIDE)

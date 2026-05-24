@@ -2,7 +2,8 @@ import type { CryptoComRow } from '../types/transaction'
 import { JournalType } from '../types/transaction'
 import type { TradeLinkIndex, TradeMatchIndex } from './tradeMatching'
 import { findLinkedTradingPair, getNetTransactionQuantity } from './tradeMatching'
-import { isUsdInstrument, isMergedUsdInternalTrade } from './usdMerge'
+import { isInternalAssetTrade } from './assetGroups'
+import { isUsdInstrument } from './usdMerge'
 
 /**
  * Checks whether a row can realize BRL profit/loss from a USD PTAX sale value.
@@ -125,7 +126,7 @@ function getManualSaleProceeds(row: CryptoComRow): number | null {
  * @param ptaxRate - PTAX rate for this row's date, or null if unavailable
  * @param tradeIndex - Trade match index built from original rows
  * @param tradeLinkIndex - Fee-aware trade link index
- * @param rows - Normalized rows for this instrument (used for USD merge detection)
+ * @param rows - Rows for this asset (used for internal asset trade detection)
  * @returns BRL profit/loss, or null when the row is not a disposition or data is missing
  */
 export function calculateProfitLoss(
@@ -137,7 +138,7 @@ export function calculateProfitLoss(
   rows: CryptoComRow[] = [],
 ): number | null {
   if (!isProfitLossDisposition(row) || avgPrice === null) return null
-  if (isMergedUsdInternalTrade(row, tradeIndex, rows)) return null
+  if (isInternalAssetTrade(row, rows)) return null
 
   const quantity = Math.abs(getNetTransactionQuantity(row, tradeLinkIndex))
   if (quantity === 0) return null

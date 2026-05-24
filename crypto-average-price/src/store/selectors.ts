@@ -49,7 +49,7 @@ function isMissingUsdCostBasis(row: ProcessedRow): boolean {
  */
 function formatMissingCostBasisMessage(row: ProcessedRow, currency: 'BRL' | 'USD'): string {
   const costColumn = currency === 'BRL' ? 'BRL Tx Cost' : 'USD Tx Cost'
-  return `${row.instrument} ${currency} Avg Price is missing at ${row.timeUtc}. Set a ${currency} Avg Price seed on that row, or enter the missing ${costColumn} before that point.`
+  return `${row.asset} ${currency} Avg Price is missing at ${row.timeUtc}. Set a ${currency} Avg Price seed on that row, or enter the missing ${costColumn} before that point.`
 }
 
 /**
@@ -63,7 +63,7 @@ function buildMissingCostBasisDiagnostics(rows: ProcessedRow[]): string[] {
 
   for (const row of rows) {
     if (isMissingBrlCostBasis(row)) {
-      const key = `${row.instrument}:BRL`
+      const key = `${row.asset}:BRL`
       if (!seen.has(key)) {
         messages.push(formatMissingCostBasisMessage(row, 'BRL'))
         seen.add(key)
@@ -71,7 +71,7 @@ function buildMissingCostBasisDiagnostics(rows: ProcessedRow[]): string[] {
     }
 
     if (isMissingUsdCostBasis(row)) {
-      const key = `${row.instrument}:USD`
+      const key = `${row.asset}:USD`
       if (!seen.has(key)) {
         messages.push(formatMissingCostBasisMessage(row, 'USD'))
         seen.add(key)
@@ -180,12 +180,12 @@ function buildDiagnostics(
 export function useAppComputedData(): AppComputedData {
   const rawTransactions = useAppStore(s => s.rawTransactions)
   const ptaxMap = useAppStore(s => s.ptaxMap)
-  const usdMergeEnabled = useAppStore(s => s.settings.usdMergeEnabled)
+  const assetGroups = useAppStore(s => s.settings.assetGroups)
 
   return useMemo(() => {
     const allProcessedRows = rawTransactions.length === 0
       ? []
-      : computeAllColumns(rawTransactions, ptaxMap, usdMergeEnabled, null)
+      : computeAllColumns(rawTransactions, ptaxMap, assetGroups, null)
     const processedRows = allProcessedRows
     const diagnostics = buildDiagnostics(rawTransactions, allProcessedRows)
 
@@ -195,7 +195,7 @@ export function useAppComputedData(): AppComputedData {
       ptaxWarnings: [],
       diagnostics,
     }
-  }, [rawTransactions, ptaxMap, usdMergeEnabled])
+  }, [rawTransactions, ptaxMap, assetGroups])
 }
 
 /**

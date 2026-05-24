@@ -12,10 +12,19 @@ export interface TableLayoutSettings {
 }
 
 /**
+ * User-defined group of exchange-reported instruments that calculate as one asset.
+ */
+export interface AssetGroup {
+  assetName: string
+  instruments: string[]
+  enabled: boolean
+}
+
+/**
  * Application settings that persist across sessions.
  */
 export interface AppSettings extends TableLayoutSettings {
-  usdMergeEnabled: boolean
+  assetGroups: AssetGroup[]
   timezoneOffset: number
   roundBalance: boolean
   panelExpanded: boolean
@@ -35,11 +44,11 @@ export function getVisibleStickyColumns(
 }
 
 /**
- * Instruments that should be merged when the USD merge toggle is ON.
+ * Instruments included in the default USD stablecoin asset group.
  */
 export const USD_INSTRUMENTS = ['USD', 'USDC', 'USDT', 'USD_Stable_Coin']
 
 /**
- * The merged instrument name when USD merge is enabled.
+ * The default USD stablecoin asset group name.
  */
 export const MERGED_USD_NAME = 'USD (merged)'

@@ -1,7 +1,9 @@
 import Papa from 'papaparse'
 import type { CryptoComRow } from '../types/transaction'
 import type { PtaxMap } from '../types/ptax'
-import { addExportedPtaxEntry, parseExportedCsvRow } from './exportSchema'
+import type { AssetGroup } from '../types/app'
+import { buildAssetGroupsFromPairs } from '../engine/assetGroups'
+import { EXPORT_CSV_COLUMNS, addExportedPtaxEntry, parseExportedCsvRow } from './exportSchema'
 
 /**
  * Parses a previously exported CSV to recover raw transactions with embedded overrides and PTAX rates.
@@ -12,6 +14,8 @@ import { addExportedPtaxEntry, parseExportedCsvRow } from './exportSchema'
 export function parseExportedCsv(file: File): Promise<{
   transactions: CryptoComRow[]
   ptaxMap: PtaxMap
+  assetGroups: AssetGroup[]
+  hasAssetData: boolean
 }> {
   return new Promise((resolve, reject) => {
     Papa.parse(file, {
@@ -20,12 +24,20 @@ export function parseExportedCsv(file: File): Promise<{
       complete(results) {
         const transactions: CryptoComRow[] = []
         const ptaxMap: PtaxMap = new Map()
+        const assetPairs: Array<{ asset: string; instrument: string }> = []
+        const fields = results.meta.fields ?? []
+        const hasAssetData = fields.includes(EXPORT_CSV_COLUMNS.ASSET)
 
         for (const rawRow of results.data as Record<string, string>[]) {
           const parsed = parseExportedCsvRow(rawRow)
           if (!parsed.transaction) continue
           transactions.push(parsed.transaction)
           addExportedPtaxEntry(ptaxMap, parsed.ptaxEntry)
+
+          const asset = rawRow[EXPORT_CSV_COLUMNS.ASSET]?.trim() || ''
+          if (asset) {
+            assetPairs.push({ asset, instrument: parsed.transaction.instrument })
+          }
         }
 
         if (transactions.length === 0) {
@@ -34,7 +46,12 @@ export function parseExportedCsv(file: File): Promise<{
         }
 
         transactions.sort((a, b) => a.order - b.order)
-        resolve({ transactions, ptaxMap })
+        resolve({
+          transactions,
+          ptaxMap,
+          assetGroups: buildAssetGroupsFromPairs(assetPairs),
+          hasAssetData,
+        })
       },
       error(err) {
         reject(new Error(`Failed to parse exported CSV: ${err.message}`))
