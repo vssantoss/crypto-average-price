@@ -270,13 +270,6 @@ export function createColumns(timezoneOffset: number, roundBalance: boolean = fa
     enableColumnFilter: false,
     meta: { editable: 'usdAvgPrice' as const, numeric: true },
   }),
-  columnHelper.accessor('brlCostRate', {
-    header: 'BRL Cost Rate',
-    size: 130,
-    cell: info => shouldHideCalculatedValue(info.row.original) ? '' : formatRoundedBrl(info.getValue(), roundBalance),
-    enableColumnFilter: false,
-    meta: { numeric: true },
-  }),
   columnHelper.accessor('cambioBC', {
     header: 'PTAX Rate',
     size: 110,

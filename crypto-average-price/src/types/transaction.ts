@@ -122,7 +122,6 @@ export interface ProcessedRow {
   usdRunningBalance: number | null
   usdTransactionCost: number | null
   usdAveragePrice: number | null
-  brlCostRate: number | null
   precoMedioCompra: number | null
   totalLucroPrejuizo: number | null
   info: string

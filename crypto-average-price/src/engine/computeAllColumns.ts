@@ -346,18 +346,23 @@ function computeLinkedUsdBuyCost(
 }
 
 /**
- * Gets automatic BRL cost details for a non-stablecoin buy funded by stablecoin.
+ * Computes PTAX-derived BRL acquisition cost for a non-stablecoin buy funded by stablecoin.
  * @param row - Non-stablecoin BUY row
- * @param stablecoinAvgBeforeByOrder - BRL average price before each stablecoin row
+ * @param ptaxRate - PTAX rate for this row's date
  * @param tradeLinkIndex - Fee-aware trade link index
- * @returns BRL cost details, or null when the linked stablecoin cost basis is unavailable
+ * @returns BRL acquisition cost, or null when the linked stablecoin sale value is unavailable
  */
-function getStablecoinFundedBrlCost(
+function computeStablecoinFundedPtaxCost(
   row: CryptoComRow,
-  stablecoinAvgBeforeByOrder: Map<number, number>,
+  ptaxRate: number | null,
   tradeLinkIndex: ReturnType<typeof buildTradeLinkIndex>,
-): { cost: number; rate: number; usdAmount: number } | null {
-  if (row.journalType !== JournalType.TRADING || row.side !== 'BUY' || isUsdInstrument(row.instrument)) {
+): number | null {
+  if (
+    ptaxRate === null ||
+    row.journalType !== JournalType.TRADING ||
+    row.side !== 'BUY' ||
+    isUsdInstrument(row.instrument)
+  ) {
     return null
   }
 
@@ -365,14 +370,7 @@ function getStablecoinFundedBrlCost(
   if (!linkedUsd) return null
 
   const usdAmount = getUsdQuantity(linkedUsd, tradeLinkIndex)
-  const rate = stablecoinAvgBeforeByOrder.get(linkedUsd.order)
-  if (usdAmount === null || rate === undefined || rate <= 0) return null
-
-  return {
-    cost: usdAmount * rate,
-    rate,
-    usdAmount,
-  }
+  return usdAmount !== null ? usdAmount * ptaxRate : null
 }
 
 /**
@@ -380,26 +378,24 @@ function getStablecoinFundedBrlCost(
  * @param row - Transaction row being priced
  * @param context - Average price calculation context
  * @param ptaxMap - PTAX date-to-rate map
- * @param stablecoinAvgBeforeByOrder - BRL average price before each stablecoin row
  * @returns BRL acquisition cost, or null when no reliable cost exists
  */
 function getBrlAcquisitionCost(
   row: CryptoComRow,
   context: AveragePriceContext,
   ptaxMap: PtaxMap,
-  stablecoinAvgBeforeByOrder: Map<number, number>,
 ): number | null {
   if (isOffchainReturnDeposit(row)) return null
 
   if (row.journalType === JournalType.TRADING && row.side === 'BUY') {
     if (row.userBrlCost !== undefined) return row.userBrlCost
 
-    const stablecoinCost = getStablecoinFundedBrlCost(row, stablecoinAvgBeforeByOrder, context.tradeLinkIndex)
-    if (stablecoinCost !== null) return stablecoinCost.cost
+    const ptaxRate = lookupPtaxRate(row.eventDate, ptaxMap)
+    const stablecoinCost = computeStablecoinFundedPtaxCost(row, ptaxRate, context.tradeLinkIndex)
+    if (stablecoinCost !== null) return stablecoinCost
 
     if (!isUsdInstrument(row.instrument)) return null
 
-    const ptaxRate = lookupPtaxRate(row.eventDate, ptaxMap)
     return computeLinkedUsdBuyCost(row, ptaxRate, context.tradeLinkIndex)
   }
 
@@ -493,7 +489,6 @@ function computePtaxSaleValue(
  * @param tradeIndex - Trade match index used to find paired USD rows
  * @param tradeLinkIndex - Fee-aware trade link index used to find linked trade pairs
  * @param rows - Normalized rows for this instrument
- * @param stablecoinAvgBeforeByOrder - BRL average price before each stablecoin row
  * @param canEditBrl - Pre-computed editability flag (avoids redundant recomputation)
  * @returns BRL transaction cost, or null when required data is missing
  */
@@ -503,7 +498,6 @@ function computeBrlTransactionCost(
   tradeIndex: ReturnType<typeof buildTradeMatchIndex>,
   tradeLinkIndex: ReturnType<typeof buildTradeLinkIndex>,
   rows: CryptoComRow[],
-  stablecoinAvgBeforeByOrder: Map<number, number>,
   canEditBrl?: boolean,
 ): number | null {
   void tradeIndex
@@ -516,8 +510,8 @@ function computeBrlTransactionCost(
     return row.userBrlCost
   }
 
-  const stablecoinCost = getStablecoinFundedBrlCost(row, stablecoinAvgBeforeByOrder, tradeLinkIndex)
-  if (stablecoinCost !== null) return stablecoinCost.cost
+  const stablecoinCost = computeStablecoinFundedPtaxCost(row, ptaxRate, tradeLinkIndex)
+  if (stablecoinCost !== null) return stablecoinCost
 
   const linkedUsdBuyCost = computeLinkedUsdBuyCost(row, ptaxRate, tradeLinkIndex)
   if (linkedUsdBuyCost !== null) return linkedUsdBuyCost
@@ -560,23 +554,6 @@ function computeUsdTransactionCost(
   }
 
   return null
-}
-
-/**
- * Computes the stablecoin average-cost rate used to derive BRL cost.
- * @param row - Transaction row to inspect
- * @param stablecoinAvgBeforeByOrder - BRL average price before each stablecoin row
- * @param tradeLinkIndex - Fee-aware trade link index
- * @returns BRL-per-stablecoin rate, or null when no automatic rate was used
- */
-function computeBrlCostRate(
-  row: CryptoComRow,
-  stablecoinAvgBeforeByOrder: Map<number, number>,
-  tradeLinkIndex: ReturnType<typeof buildTradeLinkIndex>,
-): number | null {
-  if (row.userBrlCost !== undefined) return null
-
-  return getStablecoinFundedBrlCost(row, stablecoinAvgBeforeByOrder, tradeLinkIndex)?.rate ?? null
 }
 
 interface InstrumentComputation {
@@ -638,8 +615,6 @@ export function computeAllColumns(
   const rawByOrder = new Map(allRows.map(r => [r.order, r]))
   const allProcessedRows: ProcessedRow[] = []
   const computations = new Map<string, InstrumentComputation>()
-  const emptyStablecoinRates = new Map<number, number>()
-  const stablecoinAvgBeforeByOrder = new Map<number, number>()
 
   for (const asset of assets) {
     const instrumentRows = createOffchainSplitRows(assetRows.filter(r => (r.calculationAsset || r.instrument) === asset))
@@ -650,52 +625,19 @@ export function computeAllColumns(
     const totalBalances = calculateTotalBalances(runningBalances, offchainBalances)
     const costBasisRows = createCostBasisRows(instrumentRows)
 
-    const initialBrlResults = calculateAveragePrices(
-      costBasisRows,
-      totalBalances,
-      tradeIndex,
-      tradeLinkIndex,
-      {
-        seedField: 'avgPriceSeed',
-        getAcquisitionCost: (row, context) => getBrlAcquisitionCost(row, context, ptaxMap, emptyStablecoinRates),
-      },
-    )
-
-    if (isUsdAsset(asset, instrumentRows)) {
-      for (let i = 0; i < instrumentRows.length; i++) {
-        const avgBefore = initialBrlResults[i].avgPriceBefore
-        if (avgBefore !== null && avgBefore > 0) {
-          stablecoinAvgBeforeByOrder.set(instrumentRows[i].sourceOrder ?? instrumentRows[i].order, avgBefore)
-        }
-      }
-    }
-
-    computations.set(asset, {
-      asset,
-      rows: instrumentRows,
-      costBasisRows,
-      runningBalances,
-      offchainBalances,
-      totalBalances,
-      brlResults: initialBrlResults,
-      usdResults: [],
-    })
-  }
-
-  for (const computation of computations.values()) {
     const brlResults = calculateAveragePrices(
-      computation.costBasisRows,
-      computation.totalBalances,
+      costBasisRows,
+      totalBalances,
       tradeIndex,
       tradeLinkIndex,
       {
         seedField: 'avgPriceSeed',
-        getAcquisitionCost: (row, context) => getBrlAcquisitionCost(row, context, ptaxMap, stablecoinAvgBeforeByOrder),
+        getAcquisitionCost: (row, context) => getBrlAcquisitionCost(row, context, ptaxMap),
       },
     )
     const usdResults = calculateAveragePrices(
-      computation.costBasisRows,
-      computation.totalBalances,
+      costBasisRows,
+      totalBalances,
       tradeIndex,
       tradeLinkIndex,
       {
@@ -705,8 +647,16 @@ export function computeAllColumns(
       },
     )
 
-    computation.brlResults = brlResults
-    computation.usdResults = usdResults
+    computations.set(asset, {
+      asset,
+      rows: instrumentRows,
+      costBasisRows,
+      runningBalances,
+      offchainBalances,
+      totalBalances,
+      brlResults,
+      usdResults,
+    })
   }
 
   for (const computation of computations.values()) {
@@ -732,14 +682,12 @@ export function computeAllColumns(
         tradeIndex,
         tradeLinkIndex,
         instrumentRows,
-        stablecoinAvgBeforeByOrder,
         canEditBrl,
       )
       const usdTransactionCost = computeUsdTransactionCost(row, tradeIndex, tradeLinkIndex, instrumentRows, canEditUsd)
       const brlRunningBalance = avgResult.invested
       const usdRunningBalance = isStablecoinRow ? null : usdResult.invested
       const usdAveragePrice = isStablecoinRow ? null : usdResult.avgPrice
-      const brlCostRate = computeBrlCostRate(row, stablecoinAvgBeforeByOrder, tradeLinkIndex)
       const profitLossAvgPrice = avgResult.avgPriceBefore ?? avgResult.avgPrice
 
       const profitLoss = calculateProfitLoss(
@@ -791,7 +739,6 @@ export function computeAllColumns(
         usdRunningBalance,
         usdTransactionCost: isStablecoinRow ? null : usdTransactionCost,
         usdAveragePrice,
-        brlCostRate,
         precoMedioCompra: avgResult.avgPrice,
         totalLucroPrejuizo: profitLoss,
         info: getProcessedInfo(row),
