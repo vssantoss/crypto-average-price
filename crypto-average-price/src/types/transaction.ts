@@ -12,6 +12,7 @@ export const JournalType = {
   ONCHAIN_WITHDRAWAL: 'ONCHAIN_WITHDRAWAL',
   CRYPTO_DUSTING: 'CRYPTO_DUSTING',
   MANUAL_UPDATE: 'MANUAL_UPDATE',
+  MANUAL_ADJUSTMENT: 'MANUAL_ADJUSTMENT',
 } as const
 
 export type JournalType = (typeof JournalType)[keyof typeof JournalType]

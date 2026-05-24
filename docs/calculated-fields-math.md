@@ -81,6 +81,25 @@ A `MANUAL_UPDATE` row is a non-transaction row for anchoring information on a da
 
 This means the row does not add or remove units by itself. It only tells the app: "at this point in time, the balance for this instrument should be this value."
 
+### Manual Adjustment Row
+
+A `MANUAL_ADJUSTMENT` row is a signed balance correction. It changes the selected wallet by `Tx Quantity` instead of forcing the balance to an exact value.
+
+```text
+Trading Wallet MANUAL_ADJUSTMENT: Running Balance changes by Tx Quantity
+External Wallet MANUAL_ADJUSTMENT: External Balance changes by Tx Quantity
+```
+
+If the adjustment quantity is positive, it is treated as an acquisition and can use manually entered `BRL Tx Cost` / `USD Tx Cost`. Enter `0` cost for a zero-cost dust or reward correction.
+
+If the adjustment quantity is negative, the manual BRL amount controls cost-basis movement:
+
+```text
+blank BRL Tx Cost: remove proportional cost basis
+0 BRL Tx Cost: balance-only correction, leave cost basis unchanged
+positive BRL Tx Cost: remove exactly that BRL amount of cost basis
+```
+
 ## PTAX Rate
 
 Displayed as: `PTAX Rate`
@@ -122,6 +141,7 @@ Rows that can use a manual BRL amount are:
 - offchain sales
 - trading `BUY` rows
 - trading `SELL` rows
+- positive manual adjustments
 
 USD-to-USD trades inside the merged `USD (merged)` instrument are ignored because they do not change the economic USD position.
 
@@ -195,7 +215,7 @@ If the row adds holdings and has a known BRL cost:
 BRL invested after row = BRL invested before row + BRL Tx Cost
 ```
 
-If the row is a `BUY` or acquisition deposit but does not have a known BRL cost, the app cannot continue a reliable cost basis from that point until it finds a new usable starting point, such as a manual average price seed.
+If the row is a `BUY`, acquisition deposit, or positive manual adjustment but does not have a known BRL cost, the app cannot continue a reliable cost basis from that point until it finds a new usable starting point, such as a manual average price seed.
 
 ### Sell, Offchain Sale, Onchain Withdrawal, Fee, Or Dust
 
@@ -212,6 +232,8 @@ Plain English: selling or removing part of a coin removes the same proportion of
 `OFFCHAIN_WITHDRAWAL` does not remove BRL cost basis. It only moves quantity from `Running Balance` to `External Balance`, so total holdings and average price stay aligned until an `OFFCHAIN_SALE` row is created.
 
 `OFFCHAIN_DEPOSIT` first consumes existing External Balance. The consumed portion is a return transfer and does not add BRL cost basis. If the deposit quantity is larger than the External Balance before the row, only the excess quantity is treated as a new acquisition and uses the manually entered BRL Tx Cost.
+
+Negative `MANUAL_ADJUSTMENT` rows remove proportional cost basis at the current average price when BRL Tx Cost is blank. If BRL Tx Cost is manually set, the row removes exactly that BRL amount instead. Setting BRL Tx Cost to `0` makes it a balance-only correction. These rows do not calculate profit/loss.
 
 Linked same-instrument fee rows are not counted a second time in BRL cost basis after their quantity has already been folded into the trading row's `Net Tx Quantity`.
 

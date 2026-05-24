@@ -89,6 +89,33 @@ function isCostEditableDeposit(row: CryptoComRow): boolean {
 }
 
 /**
+ * Checks whether a row is a positive manual balance adjustment.
+ * @param row - Transaction row to inspect
+ * @returns True when the adjustment adds holdings
+ */
+function isPositiveManualAdjustment(row: CryptoComRow): boolean {
+  return row.journalType === JournalType.MANUAL_ADJUSTMENT && row.transactionQuantity > 0
+}
+
+/**
+ * Checks whether a row is a negative manual balance adjustment.
+ * @param row - Transaction row to inspect
+ * @returns True when the adjustment removes holdings
+ */
+function isNegativeManualAdjustment(row: CryptoComRow): boolean {
+  return row.journalType === JournalType.MANUAL_ADJUSTMENT && row.transactionQuantity < 0
+}
+
+/**
+ * Checks whether a row is any manual balance adjustment.
+ * @param row - Transaction row to inspect
+ * @returns True when the row is a manual adjustment
+ */
+function isManualAdjustment(row: CryptoComRow): boolean {
+  return row.journalType === JournalType.MANUAL_ADJUSTMENT
+}
+
+/**
  * Determines whether BRL transaction cost can be manually edited for a row.
  * @param row - Transaction row to inspect
  * @param tradeIndex - Trade match index built from original rows
@@ -104,6 +131,7 @@ function canEditBrlTransactionCost(
 
   return (
     isCostEditableDeposit(row) ||
+    isManualAdjustment(row) ||
     isSaleOrWithdrawal(row) ||
     (row.journalType === JournalType.TRADING && row.side === 'BUY')
   )
@@ -126,6 +154,7 @@ function canEditUsdTransactionCost(
 
   return (
     isCostEditableDeposit(row) ||
+    isManualAdjustment(row) ||
     isWithdrawalDisposition(row.journalType) ||
     (row.journalType === JournalType.TRADING && row.side === 'SELL') ||
     (row.journalType === JournalType.TRADING && row.side === 'BUY')
@@ -364,6 +393,16 @@ function getBrlAcquisitionCost(
     return computeLinkedUsdBuyCost(row, ptaxRate, context.tradeLinkIndex)
   }
 
+  if (isPositiveManualAdjustment(row)) {
+    if (row.userBrlCost !== undefined) return row.userBrlCost
+    return null
+  }
+
+  if (isNegativeManualAdjustment(row)) {
+    if (row.userBrlCost !== undefined) return row.userBrlCost
+    return null
+  }
+
   if (isDeposit(row.journalType)) {
     if (row.userBrlCost !== undefined) return row.userBrlCost
     return null
@@ -385,6 +424,16 @@ function getUsdAcquisitionCost(row: CryptoComRow, context: AveragePriceContext):
   if (row.journalType === JournalType.TRADING && row.side === 'BUY') {
     if (row.userUsdCost !== undefined) return row.userUsdCost
     return getLinkedUsdAmount(row, 'SELL', context.tradeLinkIndex)
+  }
+
+  if (isPositiveManualAdjustment(row)) {
+    if (row.userUsdCost !== undefined) return row.userUsdCost
+    return null
+  }
+
+  if (isNegativeManualAdjustment(row)) {
+    if (row.userUsdCost !== undefined) return row.userUsdCost
+    return null
   }
 
   if (isDeposit(row.journalType)) {

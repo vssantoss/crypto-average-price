@@ -74,11 +74,13 @@ type RowType = 'buy' | 'sell' | 'neutral'
 function getRowType(row: ProcessedRow): RowType {
   if (
     row.side === 'BUY' ||
+    (row.journalType === JournalType.MANUAL_ADJUSTMENT && row.transactionQuantity > 0) ||
     row.journalType === JournalType.OFFCHAIN_DEPOSIT ||
     row.journalType === JournalType.ONCHAIN_DEPOSIT
   ) return 'buy'
   if (
     row.side === 'SELL' ||
+    (row.journalType === JournalType.MANUAL_ADJUSTMENT && row.transactionQuantity < 0) ||
     row.journalType === JournalType.OFFCHAIN_SALE ||
     row.journalType === JournalType.ONCHAIN_WITHDRAWAL
   ) return 'sell'

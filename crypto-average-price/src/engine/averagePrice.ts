@@ -60,6 +60,7 @@ function isCostedAcquisition(row: CryptoComRow): boolean {
 
   return (
     (row.journalType === JournalType.TRADING && row.side === 'BUY') ||
+    (row.journalType === JournalType.MANUAL_ADJUSTMENT && row.transactionQuantity > 0) ||
     row.journalType === JournalType.OFFCHAIN_DEPOSIT ||
     row.journalType === JournalType.ONCHAIN_DEPOSIT
   )
@@ -78,6 +79,24 @@ function hasUnseededPositiveBalanceAnchor(
   options: AveragePriceOptions,
 ): boolean {
   return row.balanceOverride !== undefined && balanceAfter > 0 && getSeed(row, options) === undefined
+}
+
+/**
+ * Checks whether a manual adjustment increases holdings.
+ * @param row - Transaction row to inspect
+ * @returns True when the row is a positive manual adjustment
+ */
+function isPositiveManualAdjustment(row: CryptoComRow): boolean {
+  return row.journalType === JournalType.MANUAL_ADJUSTMENT && row.transactionQuantity > 0
+}
+
+/**
+ * Checks whether a manual adjustment decreases holdings.
+ * @param row - Transaction row to inspect
+ * @returns True when the row is a negative manual adjustment
+ */
+function isNegativeManualAdjustment(row: CryptoComRow): boolean {
+  return row.journalType === JournalType.MANUAL_ADJUSTMENT && row.transactionQuantity < 0
 }
 
 /**
@@ -207,6 +226,13 @@ function forwardStep(
 
     const cost = options.getAcquisitionCost(row, buildCostContext(rowIndex, rows, runningBalances, tradeIndex, tradeLinkIndex))
     return cost !== null ? investedBefore + cost : investedBefore
+  } else if (isPositiveManualAdjustment(row)) {
+    const cost = options.getAcquisitionCost(row, buildCostContext(rowIndex, rows, runningBalances, tradeIndex, tradeLinkIndex))
+    return cost !== null ? investedBefore + cost : investedBefore
+  } else if (isNegativeManualAdjustment(row)) {
+    const cost = options.getAcquisitionCost(row, buildCostContext(rowIndex, rows, runningBalances, tradeIndex, tradeLinkIndex))
+    if (cost !== null) return investedBefore - cost
+    return avgBefore !== null ? investedBefore - avgBefore * absQty : investedBefore
   } else if (row.journalType === JournalType.SOFT_STAKE_REWARD) {
     return investedBefore
   } else if (isDisposition(row.journalType)) {
@@ -271,6 +297,14 @@ function reverseStep(
 
     const cost = options.getAcquisitionCost(row, buildCostContext(rowIndex, rows, runningBalances, tradeIndex, tradeLinkIndex))
     return cost !== null ? investedAfter - cost : investedAfter
+  } else if (isPositiveManualAdjustment(row)) {
+    const cost = options.getAcquisitionCost(row, buildCostContext(rowIndex, rows, runningBalances, tradeIndex, tradeLinkIndex))
+    return cost !== null ? investedAfter - cost : investedAfter
+  } else if (isNegativeManualAdjustment(row)) {
+    const cost = options.getAcquisitionCost(row, buildCostContext(rowIndex, rows, runningBalances, tradeIndex, tradeLinkIndex))
+    if (cost !== null) return investedAfter + cost
+    if (balanceAfter === 0) return null
+    return investedAfter * balanceBefore / balanceAfter
   } else if (row.journalType === JournalType.SOFT_STAKE_REWARD) {
     return investedAfter
   } else if (isDisposition(row.journalType)) {
