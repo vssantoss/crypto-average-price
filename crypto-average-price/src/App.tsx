@@ -2,9 +2,9 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { useAppStore } from './store/useAppStore'
 import type { DuplicateImportDecision, DuplicateImportSummary } from './store/useAppStore'
 import { useAppComputedData } from './store/selectors'
-import { UsdMergeToggle } from './components/controls/UsdMergeToggle'
 import { ColumnVisibility } from './components/controls/ColumnVisibility'
 import { ExportButton } from './components/controls/ExportButton'
+import { AssetGroupsButton } from './components/controls/AssetGroupsButton'
 import { TimezoneSelector } from './components/controls/TimezoneSelector'
 import { RoundBalanceToggle } from './components/controls/RoundBalanceToggle'
 import { DiagnosticsButton } from './components/controls/DiagnosticsButton'
@@ -202,8 +202,8 @@ function App() {
         <div className={`transition-all duration-300 ${expanded && hasData ? 'max-h-40 overflow-visible' : 'max-h-0 overflow-hidden'}`}>
           <div className="px-3 py-2 border-t border-border/50 flex flex-wrap items-center gap-3">
             <TimezoneSelector />
-            <UsdMergeToggle />
             <RoundBalanceToggle />
+            <AssetGroupsButton />
 
             <div className="w-px h-5 bg-border/50" />
 

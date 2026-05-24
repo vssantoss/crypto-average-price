@@ -1,5 +1,6 @@
 import type { CryptoComRow, ProcessedRow } from '../types/transaction'
 import { JournalType, OffchainSplitType, Wallet } from '../types/transaction'
+import type { AssetGroup } from '../types/app'
 import type { PtaxMap } from '../types/ptax'
 import {
   buildTradeMatchIndex,
@@ -15,11 +16,9 @@ import { calculateOffchainBalances } from './offchainBalance'
 import { lookupPtaxRate } from './ptaxLookup'
 import { calculateAveragePrices, type AveragePriceContext, type AvgPriceResult } from './averagePrice'
 import { calculateProfitLoss } from './profitLoss'
+import { applyAssetGroups, getUniqueAssets, isInternalAssetTrade, isUsdAsset } from './assetGroups'
 import {
-  normalizeInstruments,
-  getUniqueInstruments,
   isUsdInstrument,
-  isMergedUsdInternalTrade,
 } from './usdMerge'
 
 const SPLIT_ORDER_STEP = 0.01
@@ -68,6 +67,15 @@ function isSaleOrWithdrawal(row: CryptoComRow): boolean {
  */
 function getWallet(row: CryptoComRow): Wallet {
   return row.wallet ?? Wallet.TRADING
+}
+
+/**
+ * Checks whether a row belongs to a USD-like asset or instrument.
+ * @param row - Transaction row to inspect
+ * @returns True when the row should use stablecoin behavior
+ */
+function isUsdRow(row: CryptoComRow): boolean {
+  return isUsdInstrument(row.asset ?? '') || isUsdInstrument(row.instrument)
 }
 
 /**
@@ -127,7 +135,8 @@ function canEditBrlTransactionCost(
   tradeIndex: ReturnType<typeof buildTradeMatchIndex>,
   rows: CryptoComRow[],
 ): boolean {
-  if (isMergedUsdInternalTrade(row, tradeIndex, rows)) return false
+  void tradeIndex
+  if (isInternalAssetTrade(row, rows)) return false
 
   return (
     isCostEditableDeposit(row) ||
@@ -149,8 +158,9 @@ function canEditUsdTransactionCost(
   tradeIndex: ReturnType<typeof buildTradeMatchIndex>,
   rows: CryptoComRow[],
 ): boolean {
-  if (isUsdInstrument(row.instrument)) return false
-  if (isMergedUsdInternalTrade(row, tradeIndex, rows)) return false
+  void tradeIndex
+  if (isUsdRow(row)) return false
+  if (isInternalAssetTrade(row, rows)) return false
 
   return (
     isCostEditableDeposit(row) ||
@@ -496,7 +506,8 @@ function computeBrlTransactionCost(
   stablecoinAvgBeforeByOrder: Map<number, number>,
   canEditBrl?: boolean,
 ): number | null {
-  if (isMergedUsdInternalTrade(row, tradeIndex, rows)) {
+  void tradeIndex
+  if (isInternalAssetTrade(row, rows)) {
     return null
   }
 
@@ -530,7 +541,8 @@ function computeUsdTransactionCost(
   rows: CryptoComRow[],
   canEditUsd?: boolean,
 ): number | null {
-  if (isUsdInstrument(row.instrument) || isMergedUsdInternalTrade(row, tradeIndex, rows)) {
+  void tradeIndex
+  if (isUsdRow(row) || isInternalAssetTrade(row, rows)) {
     return null
   }
 
@@ -568,6 +580,7 @@ function computeBrlCostRate(
 }
 
 interface InstrumentComputation {
+  asset: string
   rows: CryptoComRow[]
   costBasisRows: CryptoComRow[]
   runningBalances: number[]
@@ -600,27 +613,27 @@ function getProcessedInfo(row: CryptoComRow): string {
  *
  * @param allRows - All raw Crypto.com transaction rows (all instruments)
  * @param ptaxMap - PTAX date-to-rate map
- * @param usdMergeEnabled - Whether to merge USD stablecoin variants
- * @param instrument - The instrument to compute rows for, or null for all
+ * @param assetGroups - User-defined asset groups
+ * @param instrument - The asset to compute rows for, or null for all
  * @returns Array of ProcessedRow objects ready for display
  */
 export function computeAllColumns(
   allRows: CryptoComRow[],
   ptaxMap: PtaxMap,
-  usdMergeEnabled: boolean,
+  assetGroups: AssetGroup[],
   instrument: string | null,
 ): ProcessedRow[] {
   // Build trade match index from ALL rows (before filtering)
   const tradeIndex = buildTradeMatchIndex(allRows)
   const tradeLinkIndex = buildTradeLinkIndex(allRows)
 
-  // Normalize instruments if merging USD
-  const normalizedRows = normalizeInstruments(allRows, usdMergeEnabled)
+  // Derive calculation assets while preserving reported instruments.
+  const assetRows = applyAssetGroups(allRows, assetGroups)
 
-  // Get unique instruments for grouping
-  const instruments = instrument
+  // Get unique assets for grouping.
+  const assets = instrument
     ? [instrument]
-    : getUniqueInstruments(normalizedRows)
+    : getUniqueAssets(assetRows)
 
   const rawByOrder = new Map(allRows.map(r => [r.order, r]))
   const allProcessedRows: ProcessedRow[] = []
@@ -628,8 +641,8 @@ export function computeAllColumns(
   const emptyStablecoinRates = new Map<number, number>()
   const stablecoinAvgBeforeByOrder = new Map<number, number>()
 
-  for (const inst of instruments) {
-    const instrumentRows = createOffchainSplitRows(normalizedRows.filter(r => r.instrument === inst))
+  for (const asset of assets) {
+    const instrumentRows = createOffchainSplitRows(assetRows.filter(r => (r.calculationAsset || r.instrument) === asset))
     if (instrumentRows.length === 0) continue
 
     const runningBalances = calculateRunningBalances(instrumentRows)
@@ -648,7 +661,7 @@ export function computeAllColumns(
       },
     )
 
-    if (isUsdInstrument(inst)) {
+    if (isUsdAsset(asset, instrumentRows)) {
       for (let i = 0; i < instrumentRows.length; i++) {
         const avgBefore = initialBrlResults[i].avgPriceBefore
         if (avgBefore !== null && avgBefore > 0) {
@@ -657,7 +670,8 @@ export function computeAllColumns(
       }
     }
 
-    computations.set(inst, {
+    computations.set(asset, {
+      asset,
       rows: instrumentRows,
       costBasisRows,
       runningBalances,
@@ -697,6 +711,8 @@ export function computeAllColumns(
 
   for (const computation of computations.values()) {
     const instrumentRows = computation.rows
+    const asset = computation.asset
+    const isStablecoinAsset = isUsdAsset(asset, instrumentRows)
 
     for (let i = 0; i < instrumentRows.length; i++) {
       const row = instrumentRows[i]
@@ -706,7 +722,7 @@ export function computeAllColumns(
       const avgResult = computation.brlResults[i]
       const usdResult = computation.usdResults[i]
       const ptaxRate = lookupPtaxRate(row.eventDate, ptaxMap)
-      const isStablecoinRow = isUsdInstrument(row.instrument)
+      const isStablecoinRow = isStablecoinAsset || isUsdRow(row)
 
       const canEditBrl = canEditBrlTransactionCost(row, tradeIndex, instrumentRows)
       const canEditUsd = canEditUsdTransactionCost(row, tradeIndex, instrumentRows)
@@ -737,29 +753,36 @@ export function computeAllColumns(
 
       const originalRow = rawByOrder.get(sourceOrder)
       const originalInstrument = originalRow?.instrument || row.instrument
+      const displayTransactionQuantity = row.offchainSplitType
+        ? row.transactionQuantity
+        : originalRow?.transactionQuantity ?? row.transactionQuantity
+      const displayTransactionCost = row.offchainSplitType
+        ? row.transactionCost
+        : originalRow?.transactionCost ?? row.transactionCost
       const tradeLink = getTradeLinkMetadata(originalRow || row, tradeLinkIndex)
       const tradeFeeQuantity = getLinkedTradeFeeQuantity(originalRow || row, tradeLinkIndex)
       const netTransactionQuantity = getNetTransactionQuantity(row, tradeLinkIndex)
       const suppressCalculatedFields = isFoldedTradeFeeRow(originalRow || row, tradeLinkIndex)
 
       const processed: ProcessedRow = {
-        id: `${row.order}-${row.instrument}-${row.offchainSplitType ?? 'base'}`,
+        id: `${row.order}-${asset}-${row.offchainSplitType ?? 'base'}`,
         order: row.order,
         sourceOrder,
         timeUtc: row.timeUtc,
         eventDate: row.eventDate,
         journalType: row.journalType,
-        instrument: row.instrument,
+        instrument: originalInstrument,
+        asset: row.asset || asset,
         originalInstrument,
         exchangeName: row.exchangeName || '',
         sourceFileName: row.sourceFileName || '',
         wallet: getWallet(originalRow || row),
         takerSide: row.takerSide,
         side: row.side,
-        transactionQuantity: row.transactionQuantity,
+        transactionQuantity: displayTransactionQuantity,
         tradeFeeQuantity,
         netTransactionQuantity,
-        transactionCost: row.transactionCost,
+        transactionCost: displayTransactionCost,
         runningBalance: balance,
         offchainBalance,
         cambioBC: ptaxRate,

@@ -176,6 +176,12 @@ export function createColumns(timezoneOffset: number, roundBalance: boolean = fa
       formatFilterValue: formatWallet,
     },
   }),
+  columnHelper.accessor('asset', {
+    header: 'Asset',
+    size: 130,
+    filterFn: multiValueFilter,
+    meta: { filterType: 'multiselect' as const },
+  }),
   columnHelper.accessor('instrument', {
     header: 'Instrument',
     size: 130,

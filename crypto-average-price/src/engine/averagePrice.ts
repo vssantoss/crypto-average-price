@@ -2,7 +2,7 @@ import type { CryptoComRow } from '../types/transaction'
 import { JournalType, OffchainSplitType } from '../types/transaction'
 import type { TradeLinkIndex, TradeMatchIndex } from './tradeMatching'
 import { getLinkedTradeFeeQuantity, getNetTransactionQuantity, isFoldedTradeFeeRow } from './tradeMatching'
-import { isMergedUsdInternalTrade } from './usdMerge'
+import { isInternalAssetTrade } from './assetGroups'
 
 export interface AvgPriceResult {
   avgPrice: number | null
@@ -209,7 +209,7 @@ function forwardStep(
 
   if (row.journalType === JournalType.TRADING) {
     if (row.side === 'BUY') {
-      if (!options.keepInternalUsdCost && isMergedUsdInternalTrade(row, tradeIndex, rows)) {
+      if (!options.keepInternalUsdCost && isInternalAssetTrade(row, rows)) {
         return avgBefore !== null ? investedBefore + avgBefore * absQty : investedBefore
       }
 
@@ -273,7 +273,7 @@ function reverseStep(
 
   if (row.journalType === JournalType.TRADING) {
     if (row.side === 'BUY') {
-      if (!options.keepInternalUsdCost && isMergedUsdInternalTrade(row, tradeIndex, rows)) {
+      if (!options.keepInternalUsdCost && isInternalAssetTrade(row, rows)) {
         if (balanceAfter === 0) return null
         return investedAfter * balanceBefore / balanceAfter
       }
@@ -354,7 +354,7 @@ function calculateAveragePricesFromCosts(
     if (
       isCostedAcquisition(row) &&
       cost === null &&
-      !isMergedUsdInternalTrade(row, tradeIndex, rows)
+      !isInternalAssetTrade(row, rows)
     ) {
       invested = null
       return makeResult(invested, investedBefore, balanceBefore, balanceAfter)

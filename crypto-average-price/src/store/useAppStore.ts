@@ -1,11 +1,12 @@
 import { create } from 'zustand'
 import type { CryptoComRow } from '../types/transaction'
 import type { PtaxMap } from '../types/ptax'
-import { getVisibleStickyColumns, type AppSettings, type TableLayoutSettings } from '../types/app'
+import { getVisibleStickyColumns, type AppSettings, type AssetGroup, type TableLayoutSettings } from '../types/app'
 import { parseCryptoComCsv } from '../parsers/cryptoCom'
 import { parsePtaxCsv, mergePtaxMaps } from '../parsers/ptax'
 import { parseExportedCsv } from '../parsers/outputCsv'
 import { saveSession } from '../utils/localStorage'
+import { createDefaultUsdAssetGroup, normalizeAssetGroups } from '../engine/assetGroups'
 
 interface TransactionFileImport {
   file: File
@@ -64,8 +65,8 @@ interface AppState {
   setInfoEdit: (order: number, value: string) => void
   setPanelExpanded: (expanded: boolean) => void
   toggleRoundBalance: () => void
-  toggleUsdMerge: () => void
   setTimezoneOffset: (offset: number) => void
+  setAssetGroups: (assetGroups: AssetGroup[]) => void
   setColumnVisibility: (column: string, visible: boolean) => void
   setTableLayoutPreview: (layout: TableLayoutSettings | null) => void
   commitColumnLayout: (layout: TableLayoutSettings) => void
@@ -101,7 +102,7 @@ export const defaultColumnLayout: TableLayoutSettings = {
  * Default settings.
  */
 const defaultSettings: AppSettings = {
-  usdMergeEnabled: true,
+  assetGroups: [createDefaultUsdAssetGroup()],
   ...defaultColumnLayout,
   timezoneOffset: 0,
   roundBalance: false,
@@ -158,6 +159,37 @@ function getTransactionDuplicateKey(row: CryptoComRow): string {
     row.side,
     row.transactionCost,
   ].map(normalizeDuplicateValue).join('|')
+}
+
+/**
+ * Restores asset groups from saved settings and migrates the removed USD merge toggle into a rule.
+ * @param settings - Saved app settings from localStorage
+ * @returns Normalized asset groups for the current settings schema
+ */
+function restoreAssetGroups(settings: AppSettings & { usdMergeEnabled?: boolean }): AssetGroup[] {
+  const restoredGroups = settings.assetGroups
+  const hasSavedGroups = Array.isArray(restoredGroups)
+  const defaultUsdGroup = createDefaultUsdAssetGroup()
+
+  if (!hasSavedGroups) {
+    return settings.usdMergeEnabled === false ? [] : [defaultUsdGroup]
+  }
+
+  const groups = restoredGroups
+
+  if (settings.usdMergeEnabled === false) {
+    return normalizeAssetGroups(groups)
+  }
+
+  const hasUsdGroup = groups.some(group =>
+    group.assetName.trim().toUpperCase() === defaultUsdGroup.assetName.toUpperCase()
+  )
+
+  if (settings.usdMergeEnabled === true && !hasUsdGroup) {
+    return normalizeAssetGroups([defaultUsdGroup, ...groups])
+  }
+
+  return normalizeAssetGroups(groups)
 }
 
 /**
@@ -303,7 +335,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
   async importExported(file: File) {
     set({ isLoading: true, error: null })
     try {
-      const { transactions, ptaxMap } = await parseExportedCsv(file)
+      const { transactions, ptaxMap, assetGroups, hasAssetData } = await parseExportedCsv(file)
       set(state => {
         const mergedPtax = new Map(state.ptaxMap)
         for (const [date, rate] of ptaxMap) {
@@ -312,6 +344,9 @@ export const useAppStore = create<AppState>()((set, get) => ({
         return {
           rawTransactions: transactions,
           ptaxMap: mergedPtax,
+          settings: hasAssetData
+            ? { ...state.settings, assetGroups }
+            : state.settings,
           isLoading: false,
         }
       })
@@ -403,19 +438,16 @@ export const useAppStore = create<AppState>()((set, get) => ({
     persist(get())
   },
 
-  toggleUsdMerge() {
+  setTimezoneOffset(offset: number) {
     set(state => ({
-      settings: {
-        ...state.settings,
-        usdMergeEnabled: !state.settings.usdMergeEnabled,
-      },
+      settings: { ...state.settings, timezoneOffset: offset },
     }))
     persist(get())
   },
 
-  setTimezoneOffset(offset: number) {
+  setAssetGroups(assetGroups: AssetGroup[]) {
     set(state => ({
-      settings: { ...state.settings, timezoneOffset: offset },
+      settings: { ...state.settings, assetGroups: normalizeAssetGroups(assetGroups) },
     }))
     persist(get())
   },
@@ -478,6 +510,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
       settings: {
         ...defaultSettings,
         ...restored.settings,
+        assetGroups: restoreAssetGroups(restored.settings),
         columnVisibility: {
           ...defaultSettings.columnVisibility,
           ...restored.settings.columnVisibility,

@@ -53,6 +53,10 @@ export interface CryptoComRow {
   eventDate: string
   journalType: JournalType
   instrument: string
+  /** User-facing asset name derived from all asset groups */
+  asset?: string
+  /** Internal calculation bucket derived from enabled asset groups */
+  calculationAsset?: string
   takerSide: string
   side: TradeSide
   transactionQuantity: number
@@ -99,6 +103,7 @@ export interface ProcessedRow {
   eventDate: string
   journalType: JournalType
   instrument: string
+  asset: string
   originalInstrument: string
   exchangeName: string
   sourceFileName: string
