@@ -122,7 +122,6 @@ export interface ProcessedRow {
   usdRunningBalance: number | null
   usdTransactionCost: number | null
   usdAveragePrice: number | null
-  brlCostRate: number | null
   precoMedioCompra: number | null
   totalLucroPrejuizo: number | null
   info: string
@@ -131,6 +130,7 @@ export interface ProcessedRow {
   isLinkedTradeFee: boolean
   tradeGroupId: string
   tradeGroupSource: 'id' | 'inferred' | null
+  tradeLinkTradeId: string
   tradeLinkSummary: string
   linkedFeeAmount: number | null
   linkedFeeInstrument: string

@@ -118,9 +118,11 @@ function shouldHideCalculatedValue(row: ProcessedRow): boolean {
 function formatTradeLink(row: ProcessedRow): string {
   if (!row.isTradeLinked) return ''
 
-  const groupLabel = row.tradeGroupSource === 'inferred'
-    ? row.tradeGroupId
-    : `Trade group ${row.tradeGroupId}`
+  const groupLabel = row.tradeLinkTradeId
+    ? `Trade ID ${row.tradeLinkTradeId}`
+    : row.tradeGroupSource === 'inferred'
+      ? row.tradeGroupId
+      : `Trade group ${row.tradeGroupId}`
   const feeLabel = row.linkedFeeAmount !== null
     ? ` + fee ${formatNumber(row.linkedFeeAmount, 8)}${row.linkedFeeInstrument ? ` ${row.linkedFeeInstrument}` : ''}`
     : ''
@@ -267,13 +269,6 @@ export function createColumns(timezoneOffset: number, roundBalance: boolean = fa
     cell: info => shouldHideCalculatedValue(info.row.original) ? '' : formatUsd(info.getValue(), roundBalance ? 2 : 4),
     enableColumnFilter: false,
     meta: { editable: 'usdAvgPrice' as const, numeric: true },
-  }),
-  columnHelper.accessor('brlCostRate', {
-    header: 'BRL Cost Rate',
-    size: 130,
-    cell: info => shouldHideCalculatedValue(info.row.original) ? '' : formatRoundedBrl(info.getValue(), roundBalance),
-    enableColumnFilter: false,
-    meta: { numeric: true },
   }),
   columnHelper.accessor('cambioBC', {
     header: 'PTAX Rate',

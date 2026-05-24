@@ -42,7 +42,6 @@ const CALCULATED_COLUMN_IDS = new Set([
   'usdTransactionCost',
   'usdRunningBalance',
   'usdAveragePrice',
-  'brlCostRate',
   'brlTransactionCost',
   'precoMedioCompra',
   'totalLucroPrejuizo',

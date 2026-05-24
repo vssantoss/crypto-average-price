@@ -160,6 +160,23 @@ Buy 100 USDC with BTC, linked trade fee = 1 USDC, PTAX = 5.20
 BRL Tx Cost = 99 * 5.20 = R$ 514.80
 ```
 
+### Crypto Bought With Stablecoin
+
+When a non-USD crypto is bought by selling a USD-like asset, and the app can link both trade legs:
+
+```text
+BRL Tx Cost = abs(Net Tx Quantity for the USD-like sell row) * PTAX Rate
+```
+
+Example:
+
+```text
+Buy SOL with 145 USDC, PTAX = 5.1412
+BRL Tx Cost = 145 * 5.1412 = R$ 745.474
+```
+
+The USD-like sell row separately realizes profit/loss against its BRL average cost before the trade.
+
 ### USD-Like Sale Or Onchain Withdrawal
 
 For a USD-like `SELL` row or onchain withdrawal:
