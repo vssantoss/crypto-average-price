@@ -1,4 +1,4 @@
-import { Wallet } from '../types/transaction'
+import { OffchainSplitType, Wallet } from '../types/transaction'
 import type { CryptoComRow, JournalType, ProcessedRow, TradeSide } from '../types/transaction'
 import type { PtaxMap } from '../types/ptax'
 import { parseCryptoComDate } from '../utils/date'
@@ -75,6 +75,7 @@ export function buildExportCsvRow(row: ProcessedRow, raw?: CryptoComRow, options
   const C = EXPORT_CSV_COLUMNS
 
   const calc = options?.includeCalculated
+  const includeUserCosts = row.offchainSplitType !== OffchainSplitType.RETURN
 
   const result: ExportCsvRow = {
     [C.ORDER]: row.order,
@@ -104,8 +105,8 @@ export function buildExportCsvRow(row: ProcessedRow, raw?: CryptoComRow, options
     [C.INFO]: row.info,
     [C.AVG_PRICE_SEED]: raw?.avgPriceSeed ?? '',
     [C.USD_AVG_PRICE_SEED]: raw?.usdAvgPriceSeed ?? '',
-    [C.USER_BRL_COST]: raw?.userBrlCost ?? '',
-    [C.USER_USD_COST]: raw?.userUsdCost ?? '',
+    [C.USER_BRL_COST]: includeUserCosts ? raw?.userBrlCost ?? '' : '',
+    [C.USER_USD_COST]: includeUserCosts ? raw?.userUsdCost ?? '' : '',
     [C.BALANCE_OVERRIDE]: raw?.balanceOverride ?? '',
     [C.JOURNAL_ID]: raw?.journalId ?? '',
     [C.ORDER_ID]: raw?.orderId ?? '',
@@ -117,6 +118,46 @@ export function buildExportCsvRow(row: ProcessedRow, raw?: CryptoComRow, options
   }
 
   return result
+}
+
+/**
+ * Builds one backup CSV row directly from the original raw transaction.
+ * Used when calculated fields are not included so derived table splits coalesce back to source rows.
+ * @param raw - Raw source transaction to export
+ * @param processed - Optional processed row that supplies display-only export values such as PTAX
+ * @returns Plain object keyed by export CSV column name
+ */
+export function buildRawExportCsvRow(raw: CryptoComRow, processed?: ProcessedRow): ExportCsvRow {
+  const C = EXPORT_CSV_COLUMNS
+  const wallet = raw.wallet ?? Wallet.TRADING
+
+  return {
+    [C.ORDER]: raw.order,
+    [C.TIME_UTC]: raw.timeUtc,
+    [C.EVENT_DATE]: raw.eventDate,
+    [C.JOURNAL_TYPE]: raw.journalType,
+    [C.WALLET]: wallet,
+    [C.INSTRUMENT]: raw.instrument,
+    [C.ORIGINAL_INSTRUMENT]: raw.instrument,
+    [C.TAKER_SIDE]: raw.takerSide,
+    [C.SIDE]: raw.side || '',
+    [C.TRANSACTION_QUANTITY]: raw.transactionQuantity,
+    [C.TRANSACTION_COST]: raw.transactionCost,
+    [C.PTAX_RATE]: processed?.cambioBC ?? '',
+    [C.INFO]: raw.info ?? '',
+    [C.AVG_PRICE_SEED]: raw.avgPriceSeed ?? '',
+    [C.USD_AVG_PRICE_SEED]: raw.usdAvgPriceSeed ?? '',
+    [C.USER_BRL_COST]: raw.userBrlCost ?? '',
+    [C.USER_USD_COST]: raw.userUsdCost ?? '',
+    [C.BALANCE_OVERRIDE]: raw.balanceOverride ?? '',
+    [C.JOURNAL_ID]: raw.journalId ?? '',
+    [C.ORDER_ID]: raw.orderId ?? '',
+    [C.TRADE_ID]: raw.tradeId ?? '',
+    [C.TRADE_MATCH_ID]: raw.tradeMatchId ?? '',
+    [C.CLIENT_ORDER_ID]: raw.clientOrderId ?? '',
+    [C.EXCHANGE]: raw.exchangeName ?? processed?.exchangeName ?? '',
+    [C.SOURCE_FILE]: raw.sourceFileName ?? processed?.sourceFileName ?? '',
+  }
 }
 
 /**

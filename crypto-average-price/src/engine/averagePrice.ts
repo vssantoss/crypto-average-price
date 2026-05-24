@@ -1,5 +1,5 @@
 import type { CryptoComRow } from '../types/transaction'
-import { JournalType } from '../types/transaction'
+import { JournalType, OffchainSplitType } from '../types/transaction'
 import type { TradeLinkIndex, TradeMatchIndex } from './tradeMatching'
 import { getLinkedTradeFeeQuantity, getNetTransactionQuantity, isFoldedTradeFeeRow } from './tradeMatching'
 import { isMergedUsdInternalTrade } from './usdMerge'
@@ -56,6 +56,8 @@ function getCostBasisQuantity(row: CryptoComRow, tradeLinkIndex: TradeLinkIndex)
  * @returns True if the row should add invested value when cost is known
  */
 function isCostedAcquisition(row: CryptoComRow): boolean {
+  if (row.offchainSplitType === OffchainSplitType.RETURN) return false
+
   return (
     (row.journalType === JournalType.TRADING && row.side === 'BUY') ||
     row.journalType === JournalType.OFFCHAIN_DEPOSIT ||
@@ -201,6 +203,8 @@ function forwardStep(
     row.journalType === JournalType.OFFCHAIN_DEPOSIT ||
     row.journalType === JournalType.ONCHAIN_DEPOSIT
   ) {
+    if (row.offchainSplitType === OffchainSplitType.RETURN) return investedBefore
+
     const cost = options.getAcquisitionCost(row, buildCostContext(rowIndex, rows, runningBalances, tradeIndex, tradeLinkIndex))
     return cost !== null ? investedBefore + cost : investedBefore
   } else if (row.journalType === JournalType.SOFT_STAKE_REWARD) {
@@ -263,6 +267,8 @@ function reverseStep(
     row.journalType === JournalType.OFFCHAIN_DEPOSIT ||
     row.journalType === JournalType.ONCHAIN_DEPOSIT
   ) {
+    if (row.offchainSplitType === OffchainSplitType.RETURN) return investedAfter
+
     const cost = options.getAcquisitionCost(row, buildCostContext(rowIndex, rows, runningBalances, tradeIndex, tradeLinkIndex))
     return cost !== null ? investedAfter - cost : investedAfter
   } else if (row.journalType === JournalType.SOFT_STAKE_REWARD) {

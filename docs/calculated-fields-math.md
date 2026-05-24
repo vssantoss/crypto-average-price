@@ -69,10 +69,11 @@ The external balance is the amount held outside the `Trading Wallet`. This can c
 ```text
 External Wallet row: External Balance changes by Tx Quantity
 OFFCHAIN_WITHDRAWAL: External Balance increases by abs(Tx Quantity)
+OFFCHAIN_DEPOSIT return portion: External Balance decreases by returned quantity
 OFFCHAIN_SALE: External Balance decreases by abs(Tx Quantity)
 ```
 
-Plain English: an `OFFCHAIN_WITHDRAWAL` is a transfer, not a sale. A manual `External Wallet` reward increases external holdings directly. The later manual `OFFCHAIN_SALE` row is the sale event that removes total holdings and can realize profit/loss.
+Plain English: an `OFFCHAIN_WITHDRAWAL` is a transfer, not a sale. If a later `OFFCHAIN_DEPOSIT` is covered by existing External Balance, that covered portion is a return transfer back to the Trading Wallet, not a new acquisition. A manual `External Wallet` reward increases external holdings directly. The later manual `OFFCHAIN_SALE` row is the sale event that removes total holdings and can realize profit/loss.
 
 ### Manual Update Row
 
@@ -194,7 +195,7 @@ If the row adds holdings and has a known BRL cost:
 BRL invested after row = BRL invested before row + BRL Tx Cost
 ```
 
-If the row is a `BUY` or deposit but does not have a known BRL cost, the app cannot continue a reliable cost basis from that point until it finds a new usable starting point, such as a manual average price seed.
+If the row is a `BUY` or acquisition deposit but does not have a known BRL cost, the app cannot continue a reliable cost basis from that point until it finds a new usable starting point, such as a manual average price seed.
 
 ### Sell, Offchain Sale, Onchain Withdrawal, Fee, Or Dust
 
@@ -209,6 +210,8 @@ BRL invested after row = BRL invested before row - cost basis removed
 Plain English: selling or removing part of a coin removes the same proportion of BRL cost basis that those units carried before the row.
 
 `OFFCHAIN_WITHDRAWAL` does not remove BRL cost basis. It only moves quantity from `Running Balance` to `External Balance`, so total holdings and average price stay aligned until an `OFFCHAIN_SALE` row is created.
+
+`OFFCHAIN_DEPOSIT` first consumes existing External Balance. The consumed portion is a return transfer and does not add BRL cost basis. If the deposit quantity is larger than the External Balance before the row, only the excess quantity is treated as a new acquisition and uses the manually entered BRL Tx Cost.
 
 Linked same-instrument fee rows are not counted a second time in BRL cost basis after their quantity has already been folded into the trading row's `Net Tx Quantity`.
 
