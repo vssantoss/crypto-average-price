@@ -131,6 +131,7 @@ export interface ProcessedRow {
   isLinkedTradeFee: boolean
   tradeGroupId: string
   tradeGroupSource: 'id' | 'inferred' | null
+  tradeLinkTradeId: string
   tradeLinkSummary: string
   linkedFeeAmount: number | null
   linkedFeeInstrument: string

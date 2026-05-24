@@ -118,9 +118,11 @@ function shouldHideCalculatedValue(row: ProcessedRow): boolean {
 function formatTradeLink(row: ProcessedRow): string {
   if (!row.isTradeLinked) return ''
 
-  const groupLabel = row.tradeGroupSource === 'inferred'
-    ? row.tradeGroupId
-    : `Trade group ${row.tradeGroupId}`
+  const groupLabel = row.tradeLinkTradeId
+    ? `Trade ID ${row.tradeLinkTradeId}`
+    : row.tradeGroupSource === 'inferred'
+      ? row.tradeGroupId
+      : `Trade group ${row.tradeGroupId}`
   const feeLabel = row.linkedFeeAmount !== null
     ? ` + fee ${formatNumber(row.linkedFeeAmount, 8)}${row.linkedFeeInstrument ? ` ${row.linkedFeeInstrument}` : ''}`
     : ''

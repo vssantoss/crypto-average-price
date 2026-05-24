@@ -21,6 +21,7 @@ export interface TradeLinkMetadata {
   isFee: boolean
   groupId: string
   groupSource: TradeLinkSource | null
+  tradeId: string
   summary: string
   feeAmount: number | null
   feeInstrument: string
@@ -405,6 +406,21 @@ export function getFeeRows(group: TradeGroup): CryptoComRow[] {
 }
 
 /**
+ * Gets the single Crypto.com Trade ID associated with a linked group.
+ * @param group - Trade group to inspect
+ * @returns Trade ID when all linked trade rows share one stable ID, otherwise an empty string
+ */
+function getGroupTradeId(group: TradeGroup): string {
+  const tradeIds = Array.from(new Set(
+    group.rows
+      .map(row => row.tradeId.trim())
+      .filter(hasStableId),
+  ))
+
+  return tradeIds.length === 1 ? tradeIds[0] : ''
+}
+
+/**
  * Gets the original grouped row for a possibly normalized transaction row.
  * @param row - Transaction row to match by display order
  * @param group - Linked trade group containing original rows
@@ -516,6 +532,7 @@ export function getTradeLinkMetadata(
       isFee,
       groupId: '',
       groupSource: null,
+      tradeId: '',
       summary: '',
       feeAmount: null,
       feeInstrument: '',
@@ -533,6 +550,7 @@ export function getTradeLinkMetadata(
     isFee,
     groupId: group.displayId,
     groupSource: group.source,
+    tradeId: getGroupTradeId(group),
     summary: formatTradeSummary(group),
     feeAmount,
     feeInstrument: feeInstruments.length === 1 ? feeInstruments[0] : '',

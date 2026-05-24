@@ -800,6 +800,7 @@ export function computeAllColumns(
         isLinkedTradeFee: tradeLink.isFee,
         tradeGroupId: tradeLink.groupId,
         tradeGroupSource: tradeLink.groupSource,
+        tradeLinkTradeId: tradeLink.tradeId,
         tradeLinkSummary: tradeLink.summary,
         linkedFeeAmount: tradeLink.feeAmount,
         linkedFeeInstrument: tradeLink.feeInstrument,
