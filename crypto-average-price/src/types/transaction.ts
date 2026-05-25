@@ -43,7 +43,6 @@ export type OffchainSplitType = (typeof OffchainSplitType)[keyof typeof Offchain
 export const OnchainWithdrawalRole = {
   DISPOSITION: 'disposition',
   TRANSFER: 'transfer',
-  FEE: 'fee',
 } as const
 
 export type OnchainWithdrawalRole = (typeof OnchainWithdrawalRole)[keyof typeof OnchainWithdrawalRole]
@@ -102,6 +101,8 @@ export interface CryptoComRow {
   offchainSplitType?: OffchainSplitType
   /** User-selected behavior for ONCHAIN_WITHDRAWAL rows */
   onchainWithdrawalRole?: OnchainWithdrawalRole
+  /** Net quantity received externally for ONCHAIN_WITHDRAWAL transfer rows */
+  onchainReceivedQuantity?: number
 }
 
 /**
@@ -149,6 +150,7 @@ export interface ProcessedRow {
   linkedFeeInstrument: string
   offchainSplitType: OffchainSplitType | null
   onchainWithdrawalRole: OnchainWithdrawalRole | null
+  onchainReceivedQuantity: number | null
   hasPtaxWarning: boolean
   hasBalanceOverride: boolean
   isEditable: {

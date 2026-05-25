@@ -218,7 +218,7 @@ export function createColumns(timezoneOffset: number, roundBalance: boolean = fa
     meta: { numeric: true },
   }),
   columnHelper.accessor('tradeFeeQuantity', {
-    header: 'Trade Fee',
+    header: 'Fee',
     size: 120,
     cell: info => {
       if (shouldHideCalculatedValue(info.row.original)) return ''

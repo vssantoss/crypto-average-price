@@ -15,7 +15,7 @@ interface AddRowDialogProps {
 
 const journalTypes = Object.values(JournalType)
 const walletOptions = Object.values(Wallet)
-const onchainWithdrawalRoles = Object.values(OnchainWithdrawalRole)
+const onchainWithdrawalRoles = [OnchainWithdrawalRole.DISPOSITION, OnchainWithdrawalRole.TRANSFER]
 
 /**
  * Returns the current UTC time as a formatted string: MM/DD/YYYY HH:MM:SS.
@@ -133,6 +133,7 @@ interface AddRowFormState {
   exchangeName: string
   wallet: Wallet
   onchainWithdrawalRole: OnchainWithdrawalRole
+  onchainReceivedQuantity: string
   instrument: string
   side: TradeSide
   quantity: string
@@ -201,6 +202,7 @@ function createInitialFormState(editRow?: CryptoComRow | null): AddRowFormState 
       exchangeName: '',
       wallet: Wallet.TRADING,
       onchainWithdrawalRole: OnchainWithdrawalRole.DISPOSITION,
+      onchainReceivedQuantity: '',
       instrument: '',
       side: null,
       quantity: '',
@@ -217,6 +219,7 @@ function createInitialFormState(editRow?: CryptoComRow | null): AddRowFormState 
     exchangeName: editRow.exchangeName || '',
     wallet: editRow.wallet ?? Wallet.TRADING,
     onchainWithdrawalRole: editRow.onchainWithdrawalRole ?? OnchainWithdrawalRole.DISPOSITION,
+    onchainReceivedQuantity: editRow.onchainReceivedQuantity?.toString() ?? '',
     instrument: editRow.instrument,
     side: editRow.side,
     quantity: editRow.journalType === JournalType.OFFCHAIN_SALE
@@ -262,6 +265,7 @@ function AddRowDialogContent({ open, onClose, editRow }: AddRowDialogProps) {
   const [exchangeName, setExchangeName] = useState(initialState.exchangeName)
   const [wallet, setWallet] = useState<Wallet>(initialState.wallet)
   const [onchainWithdrawalRole, setOnchainWithdrawalRole] = useState<OnchainWithdrawalRole>(initialState.onchainWithdrawalRole)
+  const [onchainReceivedQuantity, setOnchainReceivedQuantity] = useState(initialState.onchainReceivedQuantity)
   const [instrument, setInstrument] = useState(initialState.instrument)
   const [side, setSide] = useState<TradeSide>(initialState.side)
   const [quantity, setQuantity] = useState(initialState.quantity)
@@ -280,10 +284,15 @@ function AddRowDialogContent({ open, onClose, editRow }: AddRowDialogProps) {
   const offchainSale = isOffchainSale(journalType)
   const offchainWithdrawal = isOffchainWithdrawal(journalType)
   const onchainWithdrawal = isOnchainWithdrawal(journalType)
+  const onchainTransfer = onchainWithdrawal && onchainWithdrawalRole === OnchainWithdrawalRole.TRANSFER
   const quantityNumber = parseFloat(quantity)
+  const onchainReceivedQuantityNumber = parseFloat(onchainReceivedQuantity)
   const balanceOverrideNumber = parseFloat(balanceOverride)
   const balanceOverrideValid = !manualUpdate || (balanceOverride.trim() !== '' && !Number.isNaN(balanceOverrideNumber))
   const adjustmentQuantityValid = !manualAdjustment || (quantity.trim() !== '' && !Number.isNaN(quantityNumber) && quantityNumber !== 0)
+  const onchainReceivedQuantityValid = !onchainTransfer ||
+    onchainReceivedQuantity.trim() === '' ||
+    (!Number.isNaN(onchainReceivedQuantityNumber) && onchainReceivedQuantityNumber >= 0)
   const userBrlCostNumber = parseFloat(userBrlCost)
 
   /**
@@ -295,6 +304,9 @@ function AddRowDialogContent({ open, onClose, editRow }: AddRowDialogProps) {
     const normalizedExchange = exchangeName.trim()
     const nextWallet = offchainSale ? Wallet.EXTERNAL : manualUpdate || offchainWithdrawal || onchainWithdrawal ? Wallet.TRADING : wallet
     const nextOnchainWithdrawalRole = onchainWithdrawal ? onchainWithdrawalRole : undefined
+    const nextOnchainReceivedQuantity = onchainTransfer && onchainReceivedQuantity.trim() !== '' && !Number.isNaN(onchainReceivedQuantityNumber)
+      ? onchainReceivedQuantityNumber
+      : undefined
     const nextBalanceOverride = manualUpdate ? balanceOverrideNumber : manualAdjustment ? undefined : editRow?.balanceOverride
     const nextQuantity = offchainSale
       ? -Math.abs(parseFloat(quantity) || 0)
@@ -317,6 +329,7 @@ function AddRowDialogContent({ open, onClose, editRow }: AddRowDialogProps) {
         exchangeName: normalizedExchange || undefined,
         wallet: nextWallet,
         onchainWithdrawalRole: nextOnchainWithdrawalRole,
+        onchainReceivedQuantity: nextOnchainReceivedQuantity,
         instrument: normalizeInstrumentInput(instrument),
         takerSide: manualUpdate || manualAdjustment || offchainSale ? '' : takerSide.trim(),
         side: manualUpdate || manualAdjustment || offchainSale ? null : side,
@@ -340,6 +353,7 @@ function AddRowDialogContent({ open, onClose, editRow }: AddRowDialogProps) {
         exchangeName: normalizedExchange || undefined,
         wallet: nextWallet,
         onchainWithdrawalRole: nextOnchainWithdrawalRole,
+        onchainReceivedQuantity: nextOnchainReceivedQuantity,
         instrument: normalizeInstrumentInput(instrument),
         takerSide: manualUpdate || manualAdjustment || offchainSale ? '' : takerSide.trim(),
         side: manualUpdate || manualAdjustment || offchainSale ? null : side,
@@ -434,6 +448,7 @@ function AddRowDialogContent({ open, onClose, editRow }: AddRowDialogProps) {
                   if (isOnchainWithdrawal(nextJournalType)) {
                     setWallet(Wallet.TRADING)
                     setOnchainWithdrawalRole(OnchainWithdrawalRole.DISPOSITION)
+                    setOnchainReceivedQuantity('')
                   }
                 }}
                 className="bg-surface-2 border border-border rounded px-2.5 py-1.5 text-xs text-text-primary outline-none focus:border-accent/50"
@@ -458,21 +473,6 @@ function AddRowDialogContent({ open, onClose, editRow }: AddRowDialogProps) {
               </select>
             </label>
           </div>
-
-          {onchainWithdrawal && (
-            <label className="flex flex-col gap-1">
-              <span className="text-xs text-text-secondary">Withdrawal Role</span>
-              <select
-                value={onchainWithdrawalRole}
-                onChange={e => setOnchainWithdrawalRole(e.target.value as OnchainWithdrawalRole)}
-                className="bg-surface-2 border border-border rounded px-2.5 py-1.5 text-xs text-text-primary outline-none focus:border-accent/50"
-              >
-                {onchainWithdrawalRoles.map(role => (
-                  <option key={role} value={role}>{formatOnchainWithdrawalRole(role)}</option>
-                ))}
-              </select>
-            </label>
-          )}
 
           <label className="flex flex-col gap-1">
             <span className="text-xs text-text-secondary">Instrument</span>
@@ -629,6 +629,47 @@ function AddRowDialogContent({ open, onClose, editRow }: AddRowDialogProps) {
               </div>
             </>
           )}
+
+          {onchainWithdrawal && (
+            <label className="flex flex-col gap-1">
+              <span className="text-xs text-text-secondary">Withdrawal Role</span>
+              <select
+                value={onchainWithdrawalRole}
+                onChange={e => {
+                  const nextRole = e.target.value as OnchainWithdrawalRole
+                  setOnchainWithdrawalRole(nextRole)
+                  if (nextRole !== OnchainWithdrawalRole.TRANSFER) setOnchainReceivedQuantity('')
+                }}
+                className="bg-surface-2 border border-border rounded px-2.5 py-1.5 text-xs text-text-primary outline-none focus:border-accent/50"
+              >
+                {onchainWithdrawalRoles.map(role => (
+                  <option key={role} value={role}>{formatOnchainWithdrawalRole(role)}</option>
+                ))}
+              </select>
+            </label>
+          )}
+
+          {onchainTransfer && (
+            <label className="flex flex-col gap-1">
+              <span className="text-xs text-text-secondary">Amount Received</span>
+              <input
+                type="text"
+                value={onchainReceivedQuantity}
+                onChange={e => setOnchainReceivedQuantity(e.target.value)}
+                placeholder="Leave blank if same as transferred"
+                className={`bg-surface-2 border rounded px-2.5 py-1.5 text-xs text-text-primary outline-none placeholder:text-text-muted ${
+                  !onchainReceivedQuantityValid ? 'border-danger focus:border-danger' : 'border-border focus:border-accent/50'
+                }`}
+              />
+              {!onchainReceivedQuantityValid ? (
+                <span className="text-xs text-danger">Enter a non-negative amount received</span>
+              ) : (
+                <span className="text-xs text-text-muted">
+                  Check whether a network fee was charged and enter the amount that actually arrived.
+                </span>
+              )}
+            </label>
+          )}
         </div>
 
         <DialogFooter>
@@ -640,7 +681,7 @@ function AddRowDialogContent({ open, onClose, editRow }: AddRowDialogProps) {
           </button>
           <button
             onClick={() => handleSave()}
-            disabled={!instrument.trim() || !dateValid || !balanceOverrideValid || !adjustmentQuantityValid}
+            disabled={!instrument.trim() || !dateValid || !balanceOverrideValid || !adjustmentQuantityValid || !onchainReceivedQuantityValid}
             className={dialogPrimaryClass}
           >
             {isEdit ? 'Save' : 'Add'}

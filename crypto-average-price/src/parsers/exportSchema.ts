@@ -21,7 +21,7 @@ export const EXPORT_CSV_COLUMNS = {
   TAKER_SIDE: 'Taker Side',
   SIDE: 'Side',
   TRANSACTION_QUANTITY: 'Transaction Quantity',
-  TRADE_FEE: 'Trade Fee',
+  TRADE_FEE: 'Fee',
   NET_TRANSACTION_QUANTITY: 'Net Tx Quantity',
   TRANSACTION_COST: 'Transaction Cost',
   ORDER_ID: 'Order ID',
@@ -45,6 +45,7 @@ export const EXPORT_CSV_COLUMNS = {
   USER_USD_COST: '_UserUsdCost',
   BALANCE_OVERRIDE: '_BalanceOverride',
   ONCHAIN_WITHDRAWAL_ROLE: '_OnchainWithdrawalRole',
+  ONCHAIN_RECEIVED_QUANTITY: '_OnchainReceivedQuantity',
 } as const
 
 type ExportCsvRow = Record<string, string | number>
@@ -118,6 +119,7 @@ export function buildExportCsvRow(row: ProcessedRow, raw?: CryptoComRow, options
     [C.USER_USD_COST]: includeUserCosts ? raw?.userUsdCost ?? '' : '',
     [C.BALANCE_OVERRIDE]: raw?.balanceOverride ?? '',
     [C.ONCHAIN_WITHDRAWAL_ROLE]: raw?.onchainWithdrawalRole ?? row.onchainWithdrawalRole ?? '',
+    [C.ONCHAIN_RECEIVED_QUANTITY]: raw?.onchainReceivedQuantity ?? row.onchainReceivedQuantity ?? '',
     [C.JOURNAL_ID]: raw?.journalId ?? '',
     [C.ORDER_ID]: raw?.orderId ?? '',
     [C.TRADE_ID]: raw?.tradeId ?? '',
@@ -161,6 +163,7 @@ export function buildRawExportCsvRow(raw: CryptoComRow, processed?: ProcessedRow
     [C.USER_USD_COST]: raw.userUsdCost ?? '',
     [C.BALANCE_OVERRIDE]: raw.balanceOverride ?? '',
     [C.ONCHAIN_WITHDRAWAL_ROLE]: raw.onchainWithdrawalRole ?? '',
+    [C.ONCHAIN_RECEIVED_QUANTITY]: raw.onchainReceivedQuantity ?? '',
     [C.JOURNAL_ID]: raw.journalId ?? '',
     [C.ORDER_ID]: raw.orderId ?? '',
     [C.TRADE_ID]: raw.tradeId ?? '',
@@ -249,6 +252,11 @@ export function parseExportedCsvRow(rawRow: Record<string, string>): {
   const onchainWithdrawalRole = parseOnchainWithdrawalRole(rawRow[C.ONCHAIN_WITHDRAWAL_ROLE])
   if (transaction.journalType === JournalType.ONCHAIN_WITHDRAWAL && onchainWithdrawalRole !== undefined) {
     transaction.onchainWithdrawalRole = onchainWithdrawalRole
+  }
+
+  const onchainReceivedQuantityStr = rawRow[C.ONCHAIN_RECEIVED_QUANTITY] || ''
+  if (transaction.journalType === JournalType.ONCHAIN_WITHDRAWAL && onchainReceivedQuantityStr.trim() !== '') {
+    transaction.onchainReceivedQuantity = cleanCsvNumber(onchainReceivedQuantityStr)
   }
 
   const cambio = rawRow[C.PTAX_RATE] || ''

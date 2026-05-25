@@ -23,8 +23,8 @@ This software is provided as is for personal recordkeeping and calculation assis
 - `BRL invested` means the total cost basis still assigned to the current holdings after the row.
 - `avg price` means `BRL invested / total holdings`.
 - `PTAX` means the imported Banco Central do Brasil USD/BRL sell rate for the row date, or the most recent previous rate found within the lookup window.
-- `Trade Fee` means the positive quantity from linked `TRADE_FEE` rows when the fee uses the same instrument as the trading row.
-- `Net Tx Quantity` means `Tx Quantity - Trade Fee`.
+- `Fee` means the positive quantity charged as a fee on the row. For trades, this comes from linked `TRADE_FEE` rows; for on-chain transfers, this is the difference between the gross transfer and the amount received.
+- `Net Tx Quantity` means `Tx Quantity` adjusted by `Fee`.
 
 ## Running Balance
 
@@ -69,7 +69,7 @@ The external balance is the amount held outside the `Trading Wallet`. This can c
 ```text
 External Wallet row: External Balance changes by Tx Quantity
 OFFCHAIN_WITHDRAWAL: External Balance increases by abs(Tx Quantity)
-ONCHAIN_WITHDRAWAL marked Transfer: External Balance increases by abs(Tx Quantity)
+ONCHAIN_WITHDRAWAL marked Transfer: External Balance increases by Amount Received, or abs(Tx Quantity) when Amount Received is blank
 OFFCHAIN_DEPOSIT return portion: External Balance decreases by returned quantity
 OFFCHAIN_SALE: External Balance decreases by abs(Tx Quantity)
 ```
@@ -125,7 +125,7 @@ Displayed as: `BRL Tx Cost`
 
 This field means "the BRL amount attached to this row." For buys and deposits, it is acquisition cost. For sells, `ONCHAIN_WITHDRAWAL` rows marked `Disposition`, and offchain sales, it is sale proceeds.
 
-When a trading row has a linked same-instrument fee, PTAX-based trade math uses `Net Tx Quantity` instead of raw `Tx Quantity`.
+When a row has a same-instrument fee, PTAX-based trade math uses `Net Tx Quantity` instead of raw `Tx Quantity`.
 
 ### Manual Value
 
@@ -157,7 +157,7 @@ BRL Tx Cost = abs(Net Tx Quantity for the USD-like buy row) * PTAX Rate
 Example:
 
 ```text
-Buy 100 USDC with BTC, linked trade fee = 1 USDC, PTAX = 5.20
+Buy 100 USDC with BTC, linked fee = 1 USDC, PTAX = 5.20
 BRL Tx Cost = 99 * 5.20 = R$ 514.80
 ```
 
@@ -183,7 +183,7 @@ The USD-like sell row separately realizes profit/loss against its BRL average co
 For a USD-like `SELL` row or `ONCHAIN_WITHDRAWAL` marked `Disposition`:
 
 ```text
-BRL Tx Cost = USD amount sold or withdrawn, after same-instrument trade fee, * PTAX Rate
+BRL Tx Cost = USD amount sold or withdrawn, after same-instrument fee, * PTAX Rate
 ```
 
 The USD amount is:
@@ -249,7 +249,7 @@ Plain English: selling or removing part of a coin removes the same proportion of
 
 `OFFCHAIN_WITHDRAWAL` and `ONCHAIN_WITHDRAWAL` marked `Transfer` do not remove BRL cost basis. They only move quantity from `Running Balance` to `External Balance`, so total holdings and average price stay aligned until an `OFFCHAIN_SALE` row or another taxable disposition is created.
 
-`ONCHAIN_WITHDRAWAL` marked `Fee` removes proportional cost basis like other fee rows, but it does not calculate BRL sale proceeds or profit/loss.
+For `ONCHAIN_WITHDRAWAL` marked `Transfer`, the app can store the amount actually received externally. If the received amount is lower than the gross transfer quantity, the difference appears in `Fee` and total holdings decrease by that amount.
 
 `OFFCHAIN_DEPOSIT` first consumes existing External Balance. The consumed portion is a return transfer and does not add BRL cost basis. If the deposit quantity is larger than the External Balance before the row, only the excess quantity is treated as a new acquisition and uses the manually entered BRL Tx Cost.
 
@@ -257,7 +257,7 @@ Negative `MANUAL_ADJUSTMENT` rows remove proportional cost basis at the current 
 
 Linked same-instrument fee rows are not counted a second time in BRL cost basis after their quantity has already been folded into the trading row's `Net Tx Quantity`.
 
-Matched trade fee rows remain in the table and exported CSV as raw transaction rows, but their calculated fields are blank. This includes PTAX, running balance, BRL balance, BRL transaction cost, average price, profit/loss, trade fee, and net transaction quantity.
+Matched fee rows remain in the table and exported CSV as raw transaction rows, but their calculated fields are blank. This includes PTAX, running balance, BRL balance, BRL transaction cost, average price, profit/loss, fee, and net transaction quantity.
 
 ### Soft Stake Reward
 
@@ -340,7 +340,7 @@ Where:
 cost basis sold = BRL Avg Price * abs(quantity sold or withdrawn)
 ```
 
-For linked same-instrument trading fees, `quantity sold or withdrawn` uses `Net Tx Quantity`.
+For linked same-instrument fees, `quantity sold or withdrawn` uses `Net Tx Quantity`.
 
 ### Manual Sale Proceeds
 

@@ -58,6 +58,36 @@ function isOnchainWithdrawalTransfer(row: CryptoComRow): boolean {
 }
 
 /**
+ * Gets the external quantity received from an on-chain transfer.
+ * @param row - Transaction row to inspect
+ * @returns Net received quantity, or gross quantity when no net amount was entered
+ */
+function getOnchainReceivedQuantity(row: CryptoComRow): number {
+  if (!isOnchainWithdrawalTransfer(row)) return 0
+  return row.onchainReceivedQuantity ?? Math.abs(row.transactionQuantity)
+}
+
+/**
+ * Gets the network fee implied by a gross on-chain transfer and net external receipt.
+ * @param row - Transaction row to inspect
+ * @returns Positive fee quantity, or zero when no fee is implied
+ */
+function getOnchainTransferFeeQuantity(row: CryptoComRow): number {
+  if (!isOnchainWithdrawalTransfer(row)) return 0
+  return Math.max(0, Math.abs(row.transactionQuantity) - getOnchainReceivedQuantity(row))
+}
+
+/**
+ * Gets the signed net quantity for display after transfer fees.
+ * @param row - Transaction row to inspect
+ * @returns Signed net quantity received externally
+ */
+function getOnchainTransferNetQuantity(row: CryptoComRow): number {
+  const receivedQuantity = getOnchainReceivedQuantity(row)
+  return row.transactionQuantity < 0 ? -receivedQuantity : receivedQuantity
+}
+
+/**
  * Determines if a row represents an on-chain withdrawal that keeps legacy disposition behavior.
  * @param row - Transaction row to inspect
  * @returns True when the row should be treated as a sale/spend-style withdrawal
@@ -248,8 +278,10 @@ function createOffchainSplitRows(rows: CryptoComRow[]): CryptoComRow[] {
 
     result.push({ ...row, sourceOrder: row.sourceOrder ?? row.order })
 
-    if (row.journalType === JournalType.OFFCHAIN_WITHDRAWAL || isOnchainWithdrawalTransfer(row)) {
+    if (row.journalType === JournalType.OFFCHAIN_WITHDRAWAL) {
       externalBalance += Math.abs(row.transactionQuantity)
+    } else if (isOnchainWithdrawalTransfer(row)) {
+      externalBalance += getOnchainReceivedQuantity(row)
     } else if (row.journalType === JournalType.OFFCHAIN_SALE) {
       externalBalance -= Math.abs(row.transactionQuantity)
     } else if (getWallet(row) === Wallet.EXTERNAL) {
@@ -730,8 +762,11 @@ export function computeAllColumns(
         ? row.transactionCost
         : originalRow?.transactionCost ?? row.transactionCost
       const tradeLink = getTradeLinkMetadata(originalRow || row, tradeLinkIndex)
-      const tradeFeeQuantity = getLinkedTradeFeeQuantity(originalRow || row, tradeLinkIndex)
-      const netTransactionQuantity = getNetTransactionQuantity(row, tradeLinkIndex)
+      const tradeFeeQuantity = getLinkedTradeFeeQuantity(originalRow || row, tradeLinkIndex) +
+        getOnchainTransferFeeQuantity(originalRow || row)
+      const netTransactionQuantity = isOnchainWithdrawalTransfer(originalRow || row)
+        ? getOnchainTransferNetQuantity(originalRow || row)
+        : getNetTransactionQuantity(row, tradeLinkIndex)
       const suppressCalculatedFields = isFoldedTradeFeeRow(originalRow || row, tradeLinkIndex)
 
       const processed: ProcessedRow = {
@@ -775,6 +810,9 @@ export function computeAllColumns(
         linkedFeeInstrument: tradeLink.feeInstrument,
         offchainSplitType: row.offchainSplitType ?? null,
         onchainWithdrawalRole: row.journalType === JournalType.ONCHAIN_WITHDRAWAL ? getOnchainWithdrawalRole(row) : null,
+        onchainReceivedQuantity: row.journalType === JournalType.ONCHAIN_WITHDRAWAL
+          ? row.onchainReceivedQuantity ?? null
+          : null,
         hasPtaxWarning: false,
         hasBalanceOverride: row.balanceOverride !== undefined,
         isEditable: {
