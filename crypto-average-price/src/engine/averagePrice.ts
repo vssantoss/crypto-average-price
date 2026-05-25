@@ -1,5 +1,5 @@
 import type { CryptoComRow } from '../types/transaction'
-import { JournalType, OffchainSplitType } from '../types/transaction'
+import { JournalType, OffchainSplitType, OnchainWithdrawalRole } from '../types/transaction'
 import type { TradeLinkIndex, TradeMatchIndex } from './tradeMatching'
 import { getLinkedTradeFeeQuantity, getNetTransactionQuantity, isFoldedTradeFeeRow } from './tradeMatching'
 import { isInternalAssetTrade } from './assetGroups'
@@ -27,16 +27,17 @@ export interface AveragePriceOptions {
 }
 
 /**
- * Checks whether a journal type removes holdings.
- * @param type - Journal type to inspect
+ * Checks whether a row removes holdings from total cost basis.
+ * @param row - Transaction row to inspect
  * @returns True when the row should remove proportional cost basis
  */
-function isDisposition(type: JournalType): boolean {
+function isDisposition(row: CryptoComRow): boolean {
+  const onchainRole = row.onchainWithdrawalRole ?? OnchainWithdrawalRole.DISPOSITION
   return (
-    type === JournalType.OFFCHAIN_SALE ||
-    type === JournalType.ONCHAIN_WITHDRAWAL ||
-    type === JournalType.TRADE_FEE ||
-    type === JournalType.CRYPTO_DUSTING
+    row.journalType === JournalType.OFFCHAIN_SALE ||
+    (row.journalType === JournalType.ONCHAIN_WITHDRAWAL && onchainRole !== OnchainWithdrawalRole.TRANSFER) ||
+    row.journalType === JournalType.TRADE_FEE ||
+    row.journalType === JournalType.CRYPTO_DUSTING
   )
 }
 
@@ -235,7 +236,7 @@ function forwardStep(
     return avgBefore !== null ? investedBefore - avgBefore * absQty : investedBefore
   } else if (row.journalType === JournalType.SOFT_STAKE_REWARD) {
     return investedBefore
-  } else if (isDisposition(row.journalType)) {
+  } else if (isDisposition(row)) {
     return avgBefore !== null ? investedBefore - avgBefore * absQty : investedBefore
   }
 
@@ -307,7 +308,7 @@ function reverseStep(
     return investedAfter * balanceBefore / balanceAfter
   } else if (row.journalType === JournalType.SOFT_STAKE_REWARD) {
     return investedAfter
-  } else if (isDisposition(row.journalType)) {
+  } else if (isDisposition(row)) {
     if (balanceAfter === 0) return null
     return investedAfter * balanceBefore / balanceAfter
   }

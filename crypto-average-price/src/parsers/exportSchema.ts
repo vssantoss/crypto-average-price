@@ -1,5 +1,5 @@
-import { OffchainSplitType, Wallet } from '../types/transaction'
-import type { CryptoComRow, JournalType, ProcessedRow, TradeSide } from '../types/transaction'
+import { JournalType, OffchainSplitType, OnchainWithdrawalRole, Wallet } from '../types/transaction'
+import type { CryptoComRow, ProcessedRow, TradeSide } from '../types/transaction'
 import type { PtaxMap } from '../types/ptax'
 import { parseCryptoComDate } from '../utils/date'
 import { cleanCsvNumber } from '../utils/number'
@@ -21,7 +21,7 @@ export const EXPORT_CSV_COLUMNS = {
   TAKER_SIDE: 'Taker Side',
   SIDE: 'Side',
   TRANSACTION_QUANTITY: 'Transaction Quantity',
-  TRADE_FEE: 'Trade Fee',
+  TRADE_FEE: 'Fee',
   NET_TRANSACTION_QUANTITY: 'Net Tx Quantity',
   TRANSACTION_COST: 'Transaction Cost',
   ORDER_ID: 'Order ID',
@@ -44,6 +44,8 @@ export const EXPORT_CSV_COLUMNS = {
   USER_BRL_COST: '_UserBrlCost',
   USER_USD_COST: '_UserUsdCost',
   BALANCE_OVERRIDE: '_BalanceOverride',
+  ONCHAIN_WITHDRAWAL_ROLE: '_OnchainWithdrawalRole',
+  ONCHAIN_RECEIVED_QUANTITY: '_OnchainReceivedQuantity',
 } as const
 
 type ExportCsvRow = Record<string, string | number>
@@ -61,6 +63,16 @@ export interface ExportCsvOptions {
 function getCalculatedExportValue(row: ProcessedRow, value: string | number | null): string | number {
   if (row.suppressCalculatedFields) return ''
   return value ?? ''
+}
+
+/**
+ * Parses a persisted on-chain withdrawal role.
+ * @param value - Raw role value from the backup CSV
+ * @returns Valid role, or undefined when the value is blank or unknown
+ */
+function parseOnchainWithdrawalRole(value: string | undefined): OnchainWithdrawalRole | undefined {
+  const role = value?.trim().toLowerCase() as OnchainWithdrawalRole
+  return Object.values(OnchainWithdrawalRole).includes(role) ? role : undefined
 }
 
 /**
@@ -106,6 +118,8 @@ export function buildExportCsvRow(row: ProcessedRow, raw?: CryptoComRow, options
     [C.USER_BRL_COST]: includeUserCosts ? raw?.userBrlCost ?? '' : '',
     [C.USER_USD_COST]: includeUserCosts ? raw?.userUsdCost ?? '' : '',
     [C.BALANCE_OVERRIDE]: raw?.balanceOverride ?? '',
+    [C.ONCHAIN_WITHDRAWAL_ROLE]: raw?.onchainWithdrawalRole ?? row.onchainWithdrawalRole ?? '',
+    [C.ONCHAIN_RECEIVED_QUANTITY]: raw?.onchainReceivedQuantity ?? row.onchainReceivedQuantity ?? '',
     [C.JOURNAL_ID]: raw?.journalId ?? '',
     [C.ORDER_ID]: raw?.orderId ?? '',
     [C.TRADE_ID]: raw?.tradeId ?? '',
@@ -148,6 +162,8 @@ export function buildRawExportCsvRow(raw: CryptoComRow, processed?: ProcessedRow
     [C.USER_BRL_COST]: raw.userBrlCost ?? '',
     [C.USER_USD_COST]: raw.userUsdCost ?? '',
     [C.BALANCE_OVERRIDE]: raw.balanceOverride ?? '',
+    [C.ONCHAIN_WITHDRAWAL_ROLE]: raw.onchainWithdrawalRole ?? '',
+    [C.ONCHAIN_RECEIVED_QUANTITY]: raw.onchainReceivedQuantity ?? '',
     [C.JOURNAL_ID]: raw.journalId ?? '',
     [C.ORDER_ID]: raw.orderId ?? '',
     [C.TRADE_ID]: raw.tradeId ?? '',
@@ -231,6 +247,16 @@ export function parseExportedCsvRow(rawRow: Record<string, string>): {
   const balOverrideVal = parseFloat(balOverride)
   if (!isNaN(balOverrideVal) && balOverride.trim() !== '') {
     transaction.balanceOverride = balOverrideVal
+  }
+
+  const onchainWithdrawalRole = parseOnchainWithdrawalRole(rawRow[C.ONCHAIN_WITHDRAWAL_ROLE])
+  if (transaction.journalType === JournalType.ONCHAIN_WITHDRAWAL && onchainWithdrawalRole !== undefined) {
+    transaction.onchainWithdrawalRole = onchainWithdrawalRole
+  }
+
+  const onchainReceivedQuantityStr = rawRow[C.ONCHAIN_RECEIVED_QUANTITY] || ''
+  if (transaction.journalType === JournalType.ONCHAIN_WITHDRAWAL && onchainReceivedQuantityStr.trim() !== '') {
+    transaction.onchainReceivedQuantity = cleanCsvNumber(onchainReceivedQuantityStr)
   }
 
   const cambio = rawRow[C.PTAX_RATE] || ''

@@ -14,7 +14,7 @@ import {
   type Column,
 } from '@tanstack/react-table'
 import type { ProcessedRow } from '../../types/transaction'
-import { JournalType } from '../../types/transaction'
+import { JournalType, OnchainWithdrawalRole } from '../../types/transaction'
 import { useAppStore } from '../../store/useAppStore'
 import { TABLE_ACTIONS_COLUMN_ID } from '../../types/app'
 import { createColumns } from './columns'
@@ -81,7 +81,10 @@ function getRowType(row: ProcessedRow): RowType {
     row.side === 'SELL' ||
     (row.journalType === JournalType.MANUAL_ADJUSTMENT && row.transactionQuantity < 0) ||
     row.journalType === JournalType.OFFCHAIN_SALE ||
-    row.journalType === JournalType.ONCHAIN_WITHDRAWAL
+    (
+      row.journalType === JournalType.ONCHAIN_WITHDRAWAL &&
+      row.onchainWithdrawalRole !== OnchainWithdrawalRole.TRANSFER
+    )
   ) return 'sell'
   return 'neutral'
 }

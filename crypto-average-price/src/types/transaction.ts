@@ -38,6 +38,16 @@ export const OffchainSplitType = {
 export type OffchainSplitType = (typeof OffchainSplitType)[keyof typeof OffchainSplitType]
 
 /**
+ * Per-row classification for ambiguous on-chain withdrawals.
+ */
+export const OnchainWithdrawalRole = {
+  DISPOSITION: 'disposition',
+  TRANSFER: 'transfer',
+} as const
+
+export type OnchainWithdrawalRole = (typeof OnchainWithdrawalRole)[keyof typeof OnchainWithdrawalRole]
+
+/**
  * Possible trade sides from the Crypto.com report.
  */
 export type TradeSide = 'BUY' | 'SELL' | null
@@ -89,6 +99,10 @@ export interface CryptoComRow {
   sourceOrder?: number
   /** Role of a derived OFFCHAIN_DEPOSIT split row */
   offchainSplitType?: OffchainSplitType
+  /** User-selected behavior for ONCHAIN_WITHDRAWAL rows */
+  onchainWithdrawalRole?: OnchainWithdrawalRole
+  /** Net quantity received externally for ONCHAIN_WITHDRAWAL transfer rows */
+  onchainReceivedQuantity?: number
 }
 
 /**
@@ -135,6 +149,8 @@ export interface ProcessedRow {
   linkedFeeAmount: number | null
   linkedFeeInstrument: string
   offchainSplitType: OffchainSplitType | null
+  onchainWithdrawalRole: OnchainWithdrawalRole | null
+  onchainReceivedQuantity: number | null
   hasPtaxWarning: boolean
   hasBalanceOverride: boolean
   isEditable: {

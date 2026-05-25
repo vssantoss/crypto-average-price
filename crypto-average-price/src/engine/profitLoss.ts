@@ -1,5 +1,5 @@
 import type { CryptoComRow } from '../types/transaction'
-import { JournalType } from '../types/transaction'
+import { JournalType, OnchainWithdrawalRole } from '../types/transaction'
 import type { TradeLinkIndex, TradeMatchIndex } from './tradeMatching'
 import { findLinkedTradingPair, getNetTransactionQuantity } from './tradeMatching'
 import { isInternalAssetTrade } from './assetGroups'
@@ -8,13 +8,14 @@ import { isUsdInstrument } from './usdMerge'
 /**
  * Checks whether a row can realize BRL profit/loss from a USD PTAX sale value.
  * @param row - Transaction row to inspect
- * @returns True for SELL trades, offchain sales, and onchain withdrawals
+ * @returns True for SELL trades, offchain sales, and onchain withdrawal dispositions
  */
 function isProfitLossDisposition(row: CryptoComRow): boolean {
+  const onchainRole = row.onchainWithdrawalRole ?? OnchainWithdrawalRole.DISPOSITION
   return (
     (row.journalType === JournalType.TRADING && row.side === 'SELL') ||
     row.journalType === JournalType.OFFCHAIN_SALE ||
-    row.journalType === JournalType.ONCHAIN_WITHDRAWAL
+    (row.journalType === JournalType.ONCHAIN_WITHDRAWAL && onchainRole === OnchainWithdrawalRole.DISPOSITION)
   )
 }
 
