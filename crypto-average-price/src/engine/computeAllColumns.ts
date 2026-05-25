@@ -1,5 +1,5 @@
 import type { CryptoComRow, ProcessedRow } from '../types/transaction'
-import { JournalType, OffchainSplitType, Wallet } from '../types/transaction'
+import { JournalType, OffchainSplitType, OnchainWithdrawalRole, Wallet } from '../types/transaction'
 import type { AssetGroup } from '../types/app'
 import type { PtaxMap } from '../types/ptax'
 import {
@@ -25,6 +25,15 @@ const SPLIT_ORDER_STEP = 0.01
 const QUANTITY_EPSILON = 0.00000001
 
 /**
+ * Gets the selected on-chain withdrawal role, preserving legacy disposition behavior by default.
+ * @param row - Transaction row to inspect
+ * @returns Effective on-chain withdrawal role
+ */
+function getOnchainWithdrawalRole(row: CryptoComRow): OnchainWithdrawalRole {
+  return row.onchainWithdrawalRole ?? OnchainWithdrawalRole.DISPOSITION
+}
+
+/**
  * Determines if a row represents a deposit that should have an editable BRL cost.
  * @param journalType - The journal type of the row
  * @returns True if this row type allows BRL cost editing
@@ -37,13 +46,26 @@ function isDeposit(journalType: JournalType): boolean {
 }
 
 /**
- * Determines if a row represents a withdrawal disposition.
- * @param journalType - The journal type of the row
- * @returns True if this row type removes holdings as a withdrawal
+ * Determines if a row represents an on-chain withdrawal transfer to external storage.
+ * @param row - Transaction row to inspect
+ * @returns True when the row should move holdings to External Balance
  */
-function isWithdrawalDisposition(journalType: JournalType): boolean {
+function isOnchainWithdrawalTransfer(row: CryptoComRow): boolean {
   return (
-    journalType === JournalType.ONCHAIN_WITHDRAWAL
+    row.journalType === JournalType.ONCHAIN_WITHDRAWAL &&
+    getOnchainWithdrawalRole(row) === OnchainWithdrawalRole.TRANSFER
+  )
+}
+
+/**
+ * Determines if a row represents an on-chain withdrawal that keeps legacy disposition behavior.
+ * @param row - Transaction row to inspect
+ * @returns True when the row should be treated as a sale/spend-style withdrawal
+ */
+function isWithdrawalDisposition(row: CryptoComRow): boolean {
+  return (
+    row.journalType === JournalType.ONCHAIN_WITHDRAWAL &&
+    getOnchainWithdrawalRole(row) === OnchainWithdrawalRole.DISPOSITION
   )
 }
 
@@ -56,7 +78,7 @@ function isSaleOrWithdrawal(row: CryptoComRow): boolean {
   return (
     (row.journalType === JournalType.TRADING && row.side === 'SELL') ||
     row.journalType === JournalType.OFFCHAIN_SALE ||
-    isWithdrawalDisposition(row.journalType)
+    isWithdrawalDisposition(row)
   )
 }
 
@@ -165,7 +187,7 @@ function canEditUsdTransactionCost(
   return (
     isCostEditableDeposit(row) ||
     isManualAdjustment(row) ||
-    isWithdrawalDisposition(row.journalType) ||
+    isWithdrawalDisposition(row) ||
     (row.journalType === JournalType.TRADING && row.side === 'SELL') ||
     (row.journalType === JournalType.TRADING && row.side === 'BUY')
   )
@@ -226,7 +248,7 @@ function createOffchainSplitRows(rows: CryptoComRow[]): CryptoComRow[] {
 
     result.push({ ...row, sourceOrder: row.sourceOrder ?? row.order })
 
-    if (row.journalType === JournalType.OFFCHAIN_WITHDRAWAL) {
+    if (row.journalType === JournalType.OFFCHAIN_WITHDRAWAL || isOnchainWithdrawalTransfer(row)) {
       externalBalance += Math.abs(row.transactionQuantity)
     } else if (row.journalType === JournalType.OFFCHAIN_SALE) {
       externalBalance -= Math.abs(row.transactionQuantity)
@@ -245,7 +267,7 @@ function createOffchainSplitRows(rows: CryptoComRow[]): CryptoComRow[] {
  */
 function createCostBasisRows(rows: CryptoComRow[]): CryptoComRow[] {
   return rows.map(row => {
-    if (row.journalType === JournalType.OFFCHAIN_WITHDRAWAL || isOffchainReturnDeposit(row)) {
+    if (row.journalType === JournalType.OFFCHAIN_WITHDRAWAL || isOnchainWithdrawalTransfer(row) || isOffchainReturnDeposit(row)) {
       return { ...row, transactionQuantity: 0 }
     }
 
@@ -752,6 +774,7 @@ export function computeAllColumns(
         linkedFeeAmount: tradeLink.feeAmount,
         linkedFeeInstrument: tradeLink.feeInstrument,
         offchainSplitType: row.offchainSplitType ?? null,
+        onchainWithdrawalRole: row.journalType === JournalType.ONCHAIN_WITHDRAWAL ? getOnchainWithdrawalRole(row) : null,
         hasPtaxWarning: false,
         hasBalanceOverride: row.balanceOverride !== undefined,
         isEditable: {

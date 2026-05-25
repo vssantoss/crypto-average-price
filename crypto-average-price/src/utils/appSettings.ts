@@ -11,6 +11,7 @@ export const defaultColumnLayout: TableLayoutSettings = {
     order: false,
     eventDate: false,
     wallet: false,
+    onchainWithdrawalRole: false,
     takerSide: false,
     tradeFeeQuantity: false,
     transactionCost: false,

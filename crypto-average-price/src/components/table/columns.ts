@@ -1,6 +1,6 @@
 import { createColumnHelper, type FilterFn } from '@tanstack/react-table'
 import type { ProcessedRow } from '../../types/transaction'
-import { JournalType } from '../../types/transaction'
+import { JournalType, OnchainWithdrawalRole } from '../../types/transaction'
 import { formatBrl, formatUsd, formatNumber } from '../../utils/number'
 import { isUsdInstrument } from '../../engine/usdMerge'
 
@@ -166,6 +166,16 @@ export function createColumns(timezoneOffset: number, roundBalance: boolean = fa
     meta: {
       filterType: 'multiselect' as const,
       formatFilterValue: formatJournalType,
+    },
+  }),
+  columnHelper.accessor('onchainWithdrawalRole', {
+    header: 'Withdrawal Role',
+    size: 140,
+    cell: info => formatOnchainWithdrawalRole(info.getValue()),
+    filterFn: multiValueFilter,
+    meta: {
+      filterType: 'multiselect' as const,
+      formatFilterValue: formatOnchainWithdrawalRole,
     },
   }),
   columnHelper.accessor('wallet', {
@@ -340,6 +350,16 @@ export function createColumns(timezoneOffset: number, roundBalance: boolean = fa
  */
 function formatJournalType(type: JournalType): string {
   return type.replace(/_/g, ' ')
+}
+
+/**
+ * Formats an on-chain withdrawal role for display.
+ * @param role - Role value or null for non-on-chain-withdrawal rows
+ * @returns Human-readable withdrawal role, or blank when absent
+ */
+function formatOnchainWithdrawalRole(role: OnchainWithdrawalRole | null): string {
+  if (!role) return ''
+  return role.charAt(0).toUpperCase() + role.slice(1)
 }
 
 /**

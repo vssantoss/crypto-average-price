@@ -64,16 +64,17 @@ Plain English: the app adds every incoming `Trading Wallet` amount and subtracts
 
 Displayed as: `External Balance`
 
-The external balance is the amount held outside the `Trading Wallet`. This can come from an `OFFCHAIN_WITHDRAWAL` transfer or from a manually added row whose wallet is `External Wallet`.
+The external balance is the amount held outside the `Trading Wallet`. This can come from an `OFFCHAIN_WITHDRAWAL` transfer, an `ONCHAIN_WITHDRAWAL` marked as `Transfer`, or from a manually added row whose wallet is `External Wallet`.
 
 ```text
 External Wallet row: External Balance changes by Tx Quantity
 OFFCHAIN_WITHDRAWAL: External Balance increases by abs(Tx Quantity)
+ONCHAIN_WITHDRAWAL marked Transfer: External Balance increases by abs(Tx Quantity)
 OFFCHAIN_DEPOSIT return portion: External Balance decreases by returned quantity
 OFFCHAIN_SALE: External Balance decreases by abs(Tx Quantity)
 ```
 
-Plain English: an `OFFCHAIN_WITHDRAWAL` is a transfer, not a sale. If a later `OFFCHAIN_DEPOSIT` is covered by existing External Balance, that covered portion is a return transfer back to the Trading Wallet, not a new acquisition. A manual `External Wallet` reward increases external holdings directly. The later manual `OFFCHAIN_SALE` row is the sale event that removes total holdings and can realize profit/loss.
+Plain English: an `OFFCHAIN_WITHDRAWAL` is a transfer, not a sale. An `ONCHAIN_WITHDRAWAL` is only a transfer when its role is set to `Transfer`; otherwise it keeps the role-specific behavior shown in the table. If a later `OFFCHAIN_DEPOSIT` is covered by existing External Balance, that covered portion is a return transfer back to the Trading Wallet, not a new acquisition. A manual `External Wallet` reward increases external holdings directly. The later manual `OFFCHAIN_SALE` row is the sale event that removes total holdings and can realize profit/loss.
 
 ### Manual Update Row
 
@@ -122,7 +123,7 @@ If no rate is found, the field is blank.
 
 Displayed as: `BRL Tx Cost`
 
-This field means "the BRL amount attached to this row." For buys and deposits, it is acquisition cost. For sells, onchain withdrawals, and offchain sales, it is sale proceeds.
+This field means "the BRL amount attached to this row." For buys and deposits, it is acquisition cost. For sells, `ONCHAIN_WITHDRAWAL` rows marked `Disposition`, and offchain sales, it is sale proceeds.
 
 When a trading row has a linked same-instrument fee, PTAX-based trade math uses `Net Tx Quantity` instead of raw `Tx Quantity`.
 
@@ -137,7 +138,7 @@ BRL Tx Cost = manually entered BRL amount
 Rows that can use a manual BRL amount are:
 
 - deposits
-- onchain withdrawals
+- `ONCHAIN_WITHDRAWAL` rows marked `Disposition`
 - offchain sales
 - trading `BUY` rows
 - trading `SELL` rows
@@ -177,9 +178,9 @@ BRL Tx Cost = 145 * 5.1412 = R$ 745.474
 
 The USD-like sell row separately realizes profit/loss against its BRL average cost before the trade.
 
-### USD-Like Sale Or Onchain Withdrawal
+### USD-Like Sale Or Onchain Withdrawal Disposition
 
-For a USD-like `SELL` row or onchain withdrawal:
+For a USD-like `SELL` row or `ONCHAIN_WITHDRAWAL` marked `Disposition`:
 
 ```text
 BRL Tx Cost = USD amount sold or withdrawn, after same-instrument trade fee, * PTAX Rate
@@ -210,7 +211,7 @@ The USD amount received comes from the linked USD-like row's `Net Tx Quantity`.
 - no manual BRL amount was entered for an `OFFCHAIN_SALE`
 - no PTAX rate is available for a PTAX-based sale value
 - the app cannot link both sides of a crypto-for-USD trade
-- the row is a non-USD onchain withdrawal without a manual BRL amount
+- the row is a non-USD `ONCHAIN_WITHDRAWAL` marked `Disposition` without a manual BRL amount
 
 ## BRL Balance
 
@@ -234,7 +235,7 @@ BRL invested after row = BRL invested before row + BRL Tx Cost
 
 If the row is a `BUY`, acquisition deposit, or positive manual adjustment but does not have a known BRL cost, the app cannot continue a reliable cost basis from that point until it finds a new usable starting point, such as a manual average price seed.
 
-### Sell, Offchain Sale, Onchain Withdrawal, Fee, Or Dust
+### Sell, Offchain Sale, Onchain Withdrawal Disposition, Fee, Or Dust
 
 For rows that remove holdings, the app removes cost basis at the current average price:
 
@@ -246,7 +247,9 @@ BRL invested after row = BRL invested before row - cost basis removed
 
 Plain English: selling or removing part of a coin removes the same proportion of BRL cost basis that those units carried before the row.
 
-`OFFCHAIN_WITHDRAWAL` does not remove BRL cost basis. It only moves quantity from `Running Balance` to `External Balance`, so total holdings and average price stay aligned until an `OFFCHAIN_SALE` row is created.
+`OFFCHAIN_WITHDRAWAL` and `ONCHAIN_WITHDRAWAL` marked `Transfer` do not remove BRL cost basis. They only move quantity from `Running Balance` to `External Balance`, so total holdings and average price stay aligned until an `OFFCHAIN_SALE` row or another taxable disposition is created.
+
+`ONCHAIN_WITHDRAWAL` marked `Fee` removes proportional cost basis like other fee rows, but it does not calculate BRL sale proceeds or profit/loss.
 
 `OFFCHAIN_DEPOSIT` first consumes existing External Balance. The consumed portion is a return transfer and does not add BRL cost basis. If the deposit quantity is larger than the External Balance before the row, only the excess quantity is treated as a new acquisition and uses the manually entered BRL Tx Cost.
 
@@ -323,7 +326,7 @@ This is only calculated on disposition rows:
 
 - trading `SELL`
 - offchain sale
-- onchain withdrawal
+- `ONCHAIN_WITHDRAWAL` marked `Disposition`
 
 The general formula is:
 
@@ -347,7 +350,7 @@ If the row has a manually entered `BRL Tx Cost`, that manual value is treated as
 BRL Profit/Loss = manual BRL Tx Cost - (BRL Avg Price * abs(Net Tx Quantity))
 ```
 
-### USD-Like Sale Or Onchain Withdrawal
+### USD-Like Sale Or Onchain Withdrawal Disposition
 
 For USD-like instruments:
 
@@ -369,7 +372,7 @@ BRL Profit/Loss = sale proceeds in BRL - (BRL Avg Price * abs(non-USD Net Tx Qua
 
 `BRL Profit/Loss` is blank when:
 
-- the row is not a sell, offchain sale, or onchain withdrawal
+- the row is not a sell, offchain sale, or `ONCHAIN_WITHDRAWAL` marked `Disposition`
 - `BRL Avg Price` is blank
 - quantity is zero
 - the row is an internal USD-to-USD trade
