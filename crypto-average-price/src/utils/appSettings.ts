@@ -1,7 +1,8 @@
 import { createDefaultUsdAssetGroup, normalizeAssetGroups } from '../engine/assetGroups'
 import { getVisibleStickyColumns, type AppSettings, type AssetGroup, type TableLayoutSettings } from '../types/app'
+import { DEFAULT_TIMEZONE, normalizeTimezone, timezoneFromOffset } from './timezone'
 
-export type AppSettingsInput = Partial<AppSettings> & { usdMergeEnabled?: boolean }
+export type AppSettingsInput = Partial<AppSettings> & { timezoneOffset?: number; usdMergeEnabled?: boolean }
 
 /**
  * Default datatable column layout.
@@ -27,9 +28,27 @@ export const defaultColumnLayout: TableLayoutSettings = {
 export const defaultSettings: AppSettings = {
   assetGroups: [createDefaultUsdAssetGroup()],
   ...defaultColumnLayout,
-  timezoneOffset: 0,
+  timezone: DEFAULT_TIMEZONE,
   roundBalance: false,
   panelExpanded: false,
+}
+
+/**
+ * Restores the timezone setting from current or legacy saved settings.
+ * @param settings - Settings values to apply
+ * @param baseSettings - Existing settings used when a value is absent
+ * @returns Valid IANA timezone id
+ */
+function restoreTimezone(settings: AppSettingsInput, baseSettings: AppSettings): string {
+  if (typeof settings.timezone === 'string') {
+    return normalizeTimezone(settings.timezone, baseSettings.timezone ?? defaultSettings.timezone)
+  }
+
+  if (typeof settings.timezoneOffset === 'number' && Number.isFinite(settings.timezoneOffset)) {
+    return timezoneFromOffset(settings.timezoneOffset)
+  }
+
+  return normalizeTimezone(baseSettings.timezone, defaultSettings.timezone)
 }
 
 /**
@@ -73,6 +92,9 @@ export function normalizeAppSettings(
   settings: AppSettingsInput,
   baseSettings: AppSettings = defaultSettings,
 ): AppSettings {
+  const currentSettings = { ...settings }
+  delete currentSettings.timezoneOffset
+  delete currentSettings.usdMergeEnabled
   const columnVisibility = {
     ...defaultSettings.columnVisibility,
     ...baseSettings.columnVisibility,
@@ -89,11 +111,11 @@ export function normalizeAppSettings(
   return {
     ...defaultSettings,
     ...baseSettings,
-    ...settings,
+    ...currentSettings,
     assetGroups,
     columnVisibility,
     stickyColumns,
-    timezoneOffset: settings.timezoneOffset ?? baseSettings.timezoneOffset ?? defaultSettings.timezoneOffset,
+    timezone: restoreTimezone(settings, baseSettings),
     roundBalance: settings.roundBalance ?? baseSettings.roundBalance ?? defaultSettings.roundBalance,
     panelExpanded: settings.panelExpanded ?? baseSettings.panelExpanded ?? defaultSettings.panelExpanded,
   }

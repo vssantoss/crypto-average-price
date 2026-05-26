@@ -4,6 +4,7 @@ import type { AppSettings } from '../types/app'
 
 const STORAGE_KEY = 'crypto-avg-price-session'
 const SCHEMA_VERSION = 2
+const RECOVERY_SESSION_MAX_AGE_MS = 2 * 24 * 60 * 60 * 1000
 
 /**
  * Shape of the data persisted to localStorage.
@@ -58,6 +59,10 @@ export function loadSession(): {
     const state: PersistedState = JSON.parse(raw)
     if (state.version !== SCHEMA_VERSION) return null
     if (!state.rawTransactions || state.rawTransactions.length === 0) return null
+    if (import.meta.env.PROD && Date.now() - state.timestamp > RECOVERY_SESSION_MAX_AGE_MS) {
+      clearSession()
+      return null
+    }
 
     return {
       rawTransactions: state.rawTransactions,

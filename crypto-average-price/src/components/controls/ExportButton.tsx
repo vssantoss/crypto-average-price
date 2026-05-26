@@ -53,7 +53,10 @@ function buildExportRows(data: ProcessedRow[], options?: BuildExportRowsOptions)
   const rows: Array<Record<string, string | number>> = []
 
   if (options?.includeCalculated) {
-    rows.push(...data.map(row => buildExportCsvRow(row, rawMap.get(row.sourceOrder), options)))
+    rows.push(...data.map(row => buildExportCsvRow(row, rawMap.get(row.sourceOrder), {
+      ...options,
+      timezone: settings.timezone,
+    })))
   } else {
     const seenSourceOrders = new Set<number>()
     for (const row of data) {
@@ -618,7 +621,7 @@ export function ExportButton({ data, allData }: ExportButtonProps) {
                 onChange={e => setIncludeCalculated(e.target.checked)}
                 className="h-3.5 w-3.5 accent-accent"
               />
-              <span className="text-xs text-text-secondary">Include calculated fields (useful for Excel)</span>
+              <span className="text-xs text-text-secondary">Excel CSV (Includes all calculations)</span>
             </label>
 
             <label className="flex items-center gap-2 cursor-pointer select-none">

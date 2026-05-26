@@ -1,13 +1,18 @@
 import { useState } from 'react'
 import { useAppStore } from '../../store/useAppStore'
-import { loadSession, clearSession } from '../../utils/localStorage'
+import { loadSession } from '../../utils/localStorage'
 import { Dialog, DialogFooter, dialogCancelClass, dialogPrimaryClass } from '../common/Dialog'
 import { RotateCcw } from 'lucide-react'
 
+/**
+ * Prompts the user to restore or discard a saved local session after page load.
+ * @returns Recovery dialog when a saved session exists, otherwise null
+ */
 export function RecoveryDialog() {
   const [savedSession] = useState<ReturnType<typeof loadSession>>(() => loadSession())
   const [dismissed, setDismissed] = useState(false)
   const restoreSession = useAppStore(s => s.restoreSession)
+  const clearAll = useAppStore(s => s.clearAll)
   const hasData = useAppStore(s => s.rawTransactions.length > 0)
 
   if (!savedSession || dismissed || hasData) return null
@@ -21,7 +26,7 @@ export function RecoveryDialog() {
   }
 
   function handleDiscard() {
-    clearSession()
+    clearAll()
     setDismissed(true)
   }
 

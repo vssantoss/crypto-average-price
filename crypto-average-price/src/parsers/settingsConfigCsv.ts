@@ -1,5 +1,6 @@
 import { normalizeAssetGroups } from '../engine/assetGroups'
 import type { AppSettings, AssetGroup } from '../types/app'
+import { normalizeTimezone, timezoneFromOffset } from '../utils/timezone'
 import { EXPORT_CSV_COLUMNS } from './exportSchema'
 
 const CONFIG_VERSION = 1
@@ -132,7 +133,7 @@ export function buildSettingsConfigRows(settings: AppSettings, columns: string[]
       stickyColumns: settings.stickyColumns,
     }, columns),
     buildConfigRow(CONFIG_KEYS.DISPLAY_PREFERENCES, {
-      timezoneOffset: settings.timezoneOffset,
+      timezone: settings.timezone,
       roundBalance: settings.roundBalance,
     }, columns),
     buildConfigRow(CONFIG_KEYS.UI_STATE, {
@@ -176,8 +177,10 @@ export function parseSettingsConfigRows(rows: Record<string, string>[]): ParsedS
     }
 
     if (key === CONFIG_KEYS.DISPLAY_PREFERENCES) {
-      if (typeof payload.timezoneOffset === 'number' && Number.isFinite(payload.timezoneOffset)) {
-        settings.timezoneOffset = payload.timezoneOffset
+      if (typeof payload.timezone === 'string') {
+        settings.timezone = normalizeTimezone(payload.timezone)
+      } else if (typeof payload.timezoneOffset === 'number' && Number.isFinite(payload.timezoneOffset)) {
+        settings.timezone = timezoneFromOffset(payload.timezoneOffset)
       }
       if (typeof payload.roundBalance === 'boolean') settings.roundBalance = payload.roundBalance
     }

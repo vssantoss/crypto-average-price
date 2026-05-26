@@ -4,6 +4,7 @@ import { useExchangeList, useInstrumentList } from '../../store/selectors'
 import { JournalType, OnchainWithdrawalRole, Wallet } from '../../types/transaction'
 import type { CryptoComRow, TradeSide } from '../../types/transaction'
 import { parseCryptoComDate } from '../../utils/date'
+import { convertZonedTimeToUtcString, formatUtcTimeForTimezone, isValidZonedDateTime } from '../../utils/timezone'
 import { Dialog, DialogFooter, dialogCancelClass, dialogPrimaryClass } from '../common/Dialog'
 import { Info, X } from 'lucide-react'
 
@@ -30,71 +31,6 @@ function nowUtcString(): string {
   const mi = String(d.getUTCMinutes()).padStart(2, '0')
   const s = String(d.getUTCSeconds()).padStart(2, '0')
   return `${mo}/${day}/${y} ${h}:${mi}:${s}`
-}
-
-/**
- * Parses a date/time string in 24h or 12h format into component parts.
- * Accepts MM/DD/YYYY HH:MM:SS or MM/DD/YYYY HH:MM:SS AM/PM.
- * @param timeUtc - Date/time string to parse
- * @returns Parsed date components, or null if the format is invalid
- */
-function parseDateTime(timeUtc: string): { y: number; mo: number; d: number; h: number; mi: number; s: number } | null {
-  const str = timeUtc.trim()
-  // Try 24h: MM/DD/YYYY HH:MM:SS
-  let match = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{2}):(\d{2})$/)
-  if (match) {
-    const [, mo, d, y, h, mi, s] = match.map(Number)
-    return { y, mo, d, h, mi, s }
-  }
-  // Try 12h: MM/DD/YYYY HH:MM:SS AM/PM
-  match = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{2}):(\d{2})\s*(AM|PM)$/i)
-  if (match) {
-    const [, moS, dS, yS, hS, miS, sS, ampm] = match
-    let h = Number(hS)
-    const mo = Number(moS), d = Number(dS), y = Number(yS), mi = Number(miS), s = Number(sS)
-    if (h < 1 || h > 12) return null
-    if (ampm.toUpperCase() === 'PM' && h !== 12) h += 12
-    if (ampm.toUpperCase() === 'AM' && h === 12) h = 0
-    return { y, mo, d, h, mi, s }
-  }
-  return null
-}
-
-/**
- * Validates that a date/time string parses to a real calendar date.
- * Checks that the parsed components round-trip through Date correctly.
- * @param timeUtc - Date/time string to validate
- * @returns True if the string represents a valid date
- */
-function isValidDate(timeUtc: string): boolean {
-  const p = parseDateTime(timeUtc)
-  if (!p) return false
-  const date = new Date(Date.UTC(p.y, p.mo - 1, p.d, p.h, p.mi, p.s))
-  return (
-    date.getUTCFullYear() === p.y &&
-    date.getUTCMonth() === p.mo - 1 &&
-    date.getUTCDate() === p.d &&
-    date.getUTCHours() === p.h &&
-    date.getUTCMinutes() === p.mi &&
-    date.getUTCSeconds() === p.s
-  )
-}
-
-/**
- * Normalizes a date/time string to 24-hour format: MM/DD/YYYY HH:MM:SS.
- * Converts 12h AM/PM format to 24h. Returns trimmed input if parsing fails.
- * @param timeUtc - Date/time string to normalize
- * @returns Normalized 24h format string
- */
-function normalizeTo24h(timeUtc: string): string {
-  const p = parseDateTime(timeUtc)
-  if (!p) return timeUtc.trim()
-  const mo = String(p.mo).padStart(2, '0')
-  const d = String(p.d).padStart(2, '0')
-  const h = String(p.h).padStart(2, '0')
-  const mi = String(p.mi).padStart(2, '0')
-  const s = String(p.s).padStart(2, '0')
-  return `${mo}/${d}/${p.y} ${h}:${mi}:${s}`
 }
 
 /**
@@ -192,12 +128,13 @@ function isOnchainWithdrawal(journalType: JournalType): boolean {
  * Creates the initial form state for adding or editing a transaction row.
  * When editing, populates fields from the existing row; otherwise uses defaults.
  * @param editRow - Existing row to edit, or null/undefined for a new row
+ * @param timezone - IANA timezone id used for form display
  * @returns Initial form state object
  */
-function createInitialFormState(editRow?: CryptoComRow | null): AddRowFormState {
+function createInitialFormState(editRow: CryptoComRow | null | undefined, timezone: string): AddRowFormState {
   if (!editRow) {
     return {
-      timeUtc: nowUtcString(),
+      timeUtc: formatUtcTimeForTimezone(nowUtcString(), timezone),
       journalType: JournalType.TRADING,
       exchangeName: '',
       wallet: Wallet.TRADING,
@@ -214,7 +151,7 @@ function createInitialFormState(editRow?: CryptoComRow | null): AddRowFormState 
   }
 
   return {
-    timeUtc: editRow.timeUtc,
+    timeUtc: formatUtcTimeForTimezone(editRow.timeUtc, timezone),
     journalType: editRow.journalType,
     exchangeName: editRow.exchangeName || '',
     wallet: editRow.wallet ?? Wallet.TRADING,
@@ -258,7 +195,8 @@ function AddRowDialogContent({ open, onClose, editRow }: AddRowDialogProps) {
   const addManualRow = useAppStore(s => s.addManualRow)
   const updateRow = useAppStore(s => s.updateRow)
   const rawTransactions = useAppStore(s => s.rawTransactions)
-  const initialState = createInitialFormState(editRow)
+  const timezone = useAppStore(s => s.settings.timezone)
+  const initialState = createInitialFormState(editRow, timezone)
 
   const [timeUtc, setTimeUtc] = useState(initialState.timeUtc)
   const [journalType, setJournalType] = useState<JournalType>(initialState.journalType)
@@ -278,7 +216,7 @@ function AddRowDialogContent({ open, onClose, editRow }: AddRowDialogProps) {
   const knownInstruments = useInstrumentList()
 
   const isEdit = !!editRow
-  const dateValid = isValidDate(timeUtc)
+  const dateValid = isValidZonedDateTime(timeUtc, timezone)
   const manualUpdate = isManualUpdate(journalType)
   const manualAdjustment = isManualAdjustment(journalType)
   const offchainSale = isOffchainSale(journalType)
@@ -300,7 +238,8 @@ function AddRowDialogContent({ open, onClose, editRow }: AddRowDialogProps) {
    * @param allowNewExchange - Whether a new exchange name has already been confirmed
    */
   function handleSave(allowNewExchange = false) {
-    const normalized = normalizeTo24h(timeUtc)
+    const normalized = convertZonedTimeToUtcString(timeUtc, timezone)
+    if (!normalized) return
     const normalizedExchange = exchangeName.trim()
     const nextWallet = offchainSale ? Wallet.EXTERNAL : manualUpdate || offchainWithdrawal || onchainWithdrawal ? Wallet.TRADING : wallet
     const nextOnchainWithdrawalRole = onchainWithdrawal ? onchainWithdrawalRole : undefined
@@ -385,7 +324,7 @@ function AddRowDialogContent({ open, onClose, editRow }: AddRowDialogProps) {
 
         <div className="flex flex-col gap-3">
           <label className="flex flex-col gap-1">
-            <span className="text-xs text-text-secondary">Time (UTC) — MM/DD/YYYY HH:MM:SS or HH:MM:SS AM/PM</span>
+            <span className="text-xs text-text-secondary">Time ({timezone}) — MM/DD/YYYY HH:MM:SS or HH:MM:SS AM/PM</span>
             <input
               type="text"
               value={timeUtc}

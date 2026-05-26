@@ -3,28 +3,7 @@ import type { ProcessedRow } from '../../types/transaction'
 import { JournalType, OnchainWithdrawalRole } from '../../types/transaction'
 import { formatBrl, formatUsd, formatNumber } from '../../utils/number'
 import { isUsdInstrument } from '../../engine/usdMerge'
-
-/**
- * Applies a timezone offset to a UTC time string for display.
- * @param timeStr - Time string in MM/DD/YYYY HH:MM:SS format
- * @param offsetHours - Hours to add (e.g., -3 for BRT)
- * @returns Adjusted time string, or the original if offset is zero or format is invalid
- */
-function applyTimezoneOffset(timeStr: string, offsetHours: number): string {
-  if (!offsetHours || !timeStr) return timeStr
-  const parts = timeStr.match(/^(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2}):(\d{2})$/)
-  if (!parts) return timeStr
-  const [, mo, d, y, h, mi, s] = parts
-  const date = new Date(Date.UTC(+y, +mo - 1, +d, +h, +mi, +s))
-  date.setUTCHours(date.getUTCHours() + offsetHours)
-  const oy = date.getUTCFullYear()
-  const omo = String(date.getUTCMonth() + 1).padStart(2, '0')
-  const od = String(date.getUTCDate()).padStart(2, '0')
-  const oh = String(date.getUTCHours()).padStart(2, '0')
-  const omi = String(date.getUTCMinutes()).padStart(2, '0')
-  const os = String(date.getUTCSeconds()).padStart(2, '0')
-  return `${omo}/${od}/${oy} ${oh}:${omi}:${os}`
-}
+import { formatUtcTimeForTimezone } from '../../utils/timezone'
 
 /**
  * Extracts the year from a displayed time string.
@@ -86,13 +65,13 @@ function getTextFilterValue(filterValue: unknown): string {
 }
 
 /**
- * Builds a year filter for the time column using the displayed timezone-adjusted value.
- * @param timezoneOffset - Hours offset from UTC for time display
+ * Builds a year filter for the time column using the displayed timezone value.
+ * @param timezone - IANA timezone id used for time display
  * @returns TanStack filter function that matches selected years
  */
-function createTimeYearFilter(timezoneOffset: number): FilterFn<ProcessedRow> {
+function createTimeYearFilter(timezone: string): FilterFn<ProcessedRow> {
   return (row, columnId, filterValue) => {
-    const displayedTime = applyTimezoneOffset(String(row.getValue(columnId) ?? ''), timezoneOffset)
+    const displayedTime = formatUtcTimeForTimezone(String(row.getValue(columnId) ?? ''), timezone)
     const selectedYears = getSelectedFilterValues(filterValue)
     const yearMatches = selectedYears === null || selectedYears.includes(getTimeYear(displayedTime))
     const textValue = getTextFilterValue(filterValue)
@@ -132,11 +111,11 @@ function formatTradeLink(row: ProcessedRow): string {
 
 /**
  * Creates the TanStack Table column definitions for the data table.
- * @param timezoneOffset - Hours offset from UTC for time display
+ * @param timezone - IANA timezone id used for time display
  * @param roundBalance - Whether to round BRL values to 2 decimal places
  * @returns Array of column definitions
  */
-export function createColumns(timezoneOffset: number, roundBalance: boolean = false) {
+export function createColumns(timezone: string, roundBalance: boolean = false) {
   return [
   columnHelper.accessor('order', {
     header: '#',
@@ -144,13 +123,13 @@ export function createColumns(timezoneOffset: number, roundBalance: boolean = fa
     enableColumnFilter: false,
   }),
   columnHelper.accessor('timeUtc', {
-    header: timezoneOffset === 0 ? 'Time (UTC)' : `Time (UTC${timezoneOffset > 0 ? '+' : ''}${timezoneOffset})`,
+    header: timezone === 'UTC' ? 'Time (UTC)' : `Time (${timezone})`,
     size: 160,
-    cell: info => applyTimezoneOffset(info.getValue(), timezoneOffset),
-    filterFn: createTimeYearFilter(timezoneOffset),
+    cell: info => formatUtcTimeForTimezone(info.getValue(), timezone),
+    filterFn: createTimeYearFilter(timezone),
     meta: {
       filterType: 'multiselect' as const,
-      getFilterOptionValue: (value: string) => getTimeYear(applyTimezoneOffset(value, timezoneOffset)),
+      getFilterOptionValue: (value: string) => getTimeYear(formatUtcTimeForTimezone(value, timezone)),
       textFilterPlaceholder: 'MM/DD/YYYY...',
     },
   }),

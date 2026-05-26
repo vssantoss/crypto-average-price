@@ -5,9 +5,10 @@ import { getVisibleStickyColumns, type AppSettings, type AssetGroup, type TableL
 import { parseCryptoComCsv } from '../parsers/cryptoCom'
 import { parsePtaxCsv, mergePtaxMaps } from '../parsers/ptax'
 import { parseExportedCsv } from '../parsers/outputCsv'
-import { saveSession } from '../utils/localStorage'
+import { clearSession, saveSession } from '../utils/localStorage'
 import { defaultColumnLayout, defaultSettings, normalizeAppSettings } from '../utils/appSettings'
 import { normalizeAssetGroups } from '../engine/assetGroups'
+import { normalizeTimezone, parseUtcTimeString } from '../utils/timezone'
 
 interface TransactionFileImport {
   file: File
@@ -67,7 +68,7 @@ interface AppState {
   setInfoEdit: (order: number, value: string) => void
   setPanelExpanded: (expanded: boolean) => void
   toggleRoundBalance: () => void
-  setTimezoneOffset: (offset: number) => void
+  setTimezone: (timezone: string) => void
   setAssetGroups: (assetGroups: AssetGroup[]) => void
   setColumnVisibility: (column: string, visible: boolean) => void
   setTableLayoutPreview: (layout: TableLayoutSettings | null) => void
@@ -91,9 +92,7 @@ export { defaultColumnLayout }
  * @returns Milliseconds since epoch, or 0 if parsing fails
  */
 function parseTimeMs(timeUtc: string): number {
-  const m = timeUtc.match(/(\d+)\/(\d+)\/(\d+)\s+(\d+):(\d+):(\d+)/)
-  if (!m) return 0
-  return new Date(+m[3], +m[1] - 1, +m[2], +m[4], +m[5], +m[6]).getTime()
+  return parseUtcTimeString(timeUtc)?.getTime() ?? 0
 }
 
 /**
@@ -282,21 +281,20 @@ export const useAppStore = create<AppState>()((set, get) => ({
     set({ isLoading: true, error: null })
     try {
       const { transactions, ptaxMap, assetGroups, hasAssetData, settings, hasAssetGroupsConfig } = await parseExportedCsv(file)
-      set(state => {
-        const mergedPtax = new Map(state.ptaxMap)
-        for (const [date, rate] of ptaxMap) {
-          mergedPtax.set(date, rate)
-        }
+      set(() => {
         const restoredSettings = settings
-          ? normalizeAppSettings(settings, state.settings)
-          : state.settings
+          ? normalizeAppSettings(settings)
+          : normalizeAppSettings({})
         const nextSettings = !hasAssetGroupsConfig && hasAssetData
           ? normalizeAppSettings({ assetGroups }, restoredSettings)
           : restoredSettings
         return {
           rawTransactions: transactions,
-          ptaxMap: mergedPtax,
+          ptaxMap,
           settings: nextSettings,
+          tableLayoutPreview: null,
+          activeTableFilters: [],
+          activeTableRowOrders: null,
           backupImportHasSettingsConfig: settings !== null,
           isLoading: false,
         }
@@ -389,9 +387,9 @@ export const useAppStore = create<AppState>()((set, get) => ({
     persist(get())
   },
 
-  setTimezoneOffset(offset: number) {
+  setTimezone(timezone: string) {
     set(state => ({
-      settings: { ...state.settings, timezoneOffset: offset },
+      settings: { ...state.settings, timezone: normalizeTimezone(timezone, state.settings.timezone) },
     }))
     persist(get())
   },
@@ -474,7 +472,8 @@ export const useAppStore = create<AppState>()((set, get) => ({
       backupImportHasSettingsConfig: false,
       error: null,
     })
-    pendingState = get()
+    pendingState = null
     flushPersist()
+    clearSession()
   },
 }))

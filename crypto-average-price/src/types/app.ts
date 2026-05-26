@@ -25,7 +25,7 @@ export interface AssetGroup {
  */
 export interface AppSettings extends TableLayoutSettings {
   assetGroups: AssetGroup[]
-  timezoneOffset: number
+  timezone: string
   roundBalance: boolean
   panelExpanded: boolean
 }
