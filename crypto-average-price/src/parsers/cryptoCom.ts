@@ -1,6 +1,7 @@
 import Papa from 'papaparse'
 import { type CryptoComRow, JournalType, type TradeSide } from '../types/transaction'
 import { parseCryptoComDate } from '../utils/date'
+import { parseUtcTimeString } from '../utils/timezone'
 import { EXPORT_CSV_COLUMNS } from './exportSchema'
 
 /**
@@ -119,8 +120,8 @@ export function parseCryptoComCsv(file: File): Promise<CryptoComRow[]> {
         }
 
         rows.sort((a, b) => {
-          const timeA = new Date(a.timeUtc).getTime()
-          const timeB = new Date(b.timeUtc).getTime()
+          const timeA = parseUtcTimeString(a.timeUtc)?.getTime() ?? 0
+          const timeB = parseUtcTimeString(b.timeUtc)?.getTime() ?? 0
           if (timeA !== timeB) return timeA - timeB
           return a.order - b.order
         })

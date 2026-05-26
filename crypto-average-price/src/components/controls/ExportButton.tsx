@@ -53,7 +53,10 @@ function buildExportRows(data: ProcessedRow[], options?: BuildExportRowsOptions)
   const rows: Array<Record<string, string | number>> = []
 
   if (options?.includeCalculated) {
-    rows.push(...data.map(row => buildExportCsvRow(row, rawMap.get(row.sourceOrder), options)))
+    rows.push(...data.map(row => buildExportCsvRow(row, rawMap.get(row.sourceOrder), {
+      ...options,
+      timezone: settings.timezone,
+    })))
   } else {
     const seenSourceOrders = new Set<number>()
     for (const row of data) {

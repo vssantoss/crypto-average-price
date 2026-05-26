@@ -3,12 +3,15 @@ import type { CryptoComRow, ProcessedRow, TradeSide } from '../types/transaction
 import type { PtaxMap } from '../types/ptax'
 import { parseCryptoComDate } from '../utils/date'
 import { cleanCsvNumber } from '../utils/number'
+import { DEFAULT_TIMEZONE, convertZonedTimeToUtcString, formatUtcTimeForTimezone, normalizeTimezone } from '../utils/timezone'
 
 /**
  * Column names used by the app's export CSV format.
  */
 export const EXPORT_CSV_COLUMNS = {
   ORDER: 'Order',
+  TIME: 'Time',
+  TIMEZONE: 'Timezone',
   JOURNAL_ID: 'Journal ID',
   TIME_UTC: 'Time (UTC)',
   EVENT_DATE: 'Event Date',
@@ -52,6 +55,7 @@ type ExportCsvRow = Record<string, string | number>
 
 export interface ExportCsvOptions {
   includeCalculated?: boolean
+  timezone?: string
 }
 
 /**
@@ -86,10 +90,13 @@ export function buildExportCsvRow(row: ProcessedRow, raw?: CryptoComRow, options
   const C = EXPORT_CSV_COLUMNS
 
   const calc = options?.includeCalculated
+  const timezone = normalizeTimezone(options?.timezone ?? DEFAULT_TIMEZONE)
   const includeUserCosts = row.offchainSplitType !== OffchainSplitType.RETURN
 
   const result: ExportCsvRow = {
     [C.ORDER]: row.order,
+    ...(calc && { [C.TIME]: formatUtcTimeForTimezone(row.timeUtc, timezone) }),
+    ...(calc && { [C.TIMEZONE]: timezone }),
     [C.TIME_UTC]: row.timeUtc,
     [C.EVENT_DATE]: row.eventDate,
     [C.JOURNAL_TYPE]: row.journalType,
@@ -190,12 +197,18 @@ export function parseExportedCsvRow(rawRow: Record<string, string>): {
   const side = rawRow[C.SIDE]?.trim()
   const parsedSide: TradeSide = side === 'BUY' ? 'BUY' : side === 'SELL' ? 'SELL' : null
   const eventDateRaw = rawRow[C.EVENT_DATE]?.trim() || ''
-  const eventDate = eventDateRaw.includes('-') ? eventDateRaw : parseCryptoComDate(eventDateRaw)
+  const explicitTimeUtc = rawRow[C.TIME_UTC]?.trim() || ''
+  const localTime = rawRow[C.TIME]?.trim() || ''
+  const timezone = normalizeTimezone(rawRow[C.TIMEZONE]?.trim() || DEFAULT_TIMEZONE)
+  const timeUtc = explicitTimeUtc || (localTime ? convertZonedTimeToUtcString(localTime, timezone) ?? '' : '')
+  const eventDate = eventDateRaw
+    ? eventDateRaw.includes('-') ? eventDateRaw : parseCryptoComDate(eventDateRaw)
+    : parseCryptoComDate(timeUtc)
 
   const transaction: CryptoComRow = {
     order,
     journalId: rawRow[C.JOURNAL_ID]?.trim() || '',
-    timeUtc: rawRow[C.TIME_UTC]?.trim() || '',
+    timeUtc,
     eventDate,
     journalType: rawRow[C.JOURNAL_TYPE]?.trim() as JournalType,
     wallet: rawRow[C.WALLET]?.trim() === Wallet.EXTERNAL ? Wallet.EXTERNAL : Wallet.TRADING,

@@ -24,7 +24,7 @@ function getColumnOptions(): ColumnOption[] {
     label: 'Edit/Delete',
     alwaysVisible: true,
   }
-  const dataColumns = createColumns(0).flatMap(col => {
+  const dataColumns = createColumns('UTC').flatMap(col => {
     const id = (col as { accessorKey?: string }).accessorKey || ''
     if (!id) return []
     return [{

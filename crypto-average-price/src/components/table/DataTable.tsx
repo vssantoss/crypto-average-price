@@ -273,9 +273,9 @@ export function DataTable({ data }: DataTableProps) {
   const setBalanceOverride = useAppStore(s => s.setBalanceOverride)
   const deleteRow = useAppStore(s => s.deleteRow)
   const rawTransactions = useAppStore(s => s.rawTransactions)
-  const timezoneOffset = useAppStore(s => s.settings.timezoneOffset)
+  const timezone = useAppStore(s => s.settings.timezone)
   const roundBalance = useAppStore(s => s.settings.roundBalance)
-  const cols = useMemo(() => createColumns(timezoneOffset, roundBalance), [timezoneOffset, roundBalance])
+  const cols = useMemo(() => createColumns(timezone, roundBalance), [timezone, roundBalance])
   const rawByOrder = useMemo(() => new Map(rawTransactions.map(row => [row.order, row])), [rawTransactions])
   const columnPinning = useMemo<ColumnPinningState>(() => ({
     left: dataStickyColumns,
