@@ -5,10 +5,10 @@ import { getVisibleStickyColumns, type AppSettings, type AssetGroup, type TableL
 import { parseCryptoComCsv } from '../parsers/cryptoCom'
 import { parsePtaxCsv, mergePtaxMaps } from '../parsers/ptax'
 import { parseExportedCsv } from '../parsers/outputCsv'
-import { saveSession } from '../utils/localStorage'
+import { clearSession, saveSession } from '../utils/localStorage'
 import { defaultColumnLayout, defaultSettings, normalizeAppSettings } from '../utils/appSettings'
 import { normalizeAssetGroups } from '../engine/assetGroups'
-import { DEFAULT_TIMEZONE, normalizeTimezone, parseUtcTimeString } from '../utils/timezone'
+import { normalizeTimezone, parseUtcTimeString } from '../utils/timezone'
 
 interface TransactionFileImport {
   file: File
@@ -281,21 +281,20 @@ export const useAppStore = create<AppState>()((set, get) => ({
     set({ isLoading: true, error: null })
     try {
       const { transactions, ptaxMap, assetGroups, hasAssetData, settings, hasAssetGroupsConfig } = await parseExportedCsv(file)
-      set(state => {
-        const mergedPtax = new Map(state.ptaxMap)
-        for (const [date, rate] of ptaxMap) {
-          mergedPtax.set(date, rate)
-        }
+      set(() => {
         const restoredSettings = settings
-          ? normalizeAppSettings(settings, state.settings)
-          : normalizeAppSettings({ timezone: DEFAULT_TIMEZONE }, state.settings)
+          ? normalizeAppSettings(settings)
+          : normalizeAppSettings({})
         const nextSettings = !hasAssetGroupsConfig && hasAssetData
           ? normalizeAppSettings({ assetGroups }, restoredSettings)
           : restoredSettings
         return {
           rawTransactions: transactions,
-          ptaxMap: mergedPtax,
+          ptaxMap,
           settings: nextSettings,
+          tableLayoutPreview: null,
+          activeTableFilters: [],
+          activeTableRowOrders: null,
           backupImportHasSettingsConfig: settings !== null,
           isLoading: false,
         }
@@ -473,7 +472,8 @@ export const useAppStore = create<AppState>()((set, get) => ({
       backupImportHasSettingsConfig: false,
       error: null,
     })
-    pendingState = get()
+    pendingState = null
     flushPersist()
+    clearSession()
   },
 }))
