@@ -239,6 +239,38 @@ function formatActiveFilterValue(value: unknown): string {
 }
 
 /**
+ * Serializes a column filter value for lightweight change detection.
+ * @param value - Raw TanStack column filter value
+ * @returns Stable string representation for serializable filter values
+ */
+function serializeFilterValue(value: unknown): string {
+  return JSON.stringify(value) ?? String(value)
+}
+
+/**
+ * Finds the column id whose filter changed between two filter states.
+ * @param currentFilters - Filter state before the table update
+ * @param nextFilters - Filter state after the table update
+ * @returns Changed column id, or null when no changed filter can be identified
+ */
+function getChangedFilterId(currentFilters: ColumnFiltersState, nextFilters: ColumnFiltersState): string | null {
+  const currentById = new Map(currentFilters.map(filter => [filter.id, filter.value]))
+  const nextById = new Map(nextFilters.map(filter => [filter.id, filter.value]))
+
+  for (const filter of nextFilters) {
+    if (!currentById.has(filter.id) || serializeFilterValue(currentById.get(filter.id)) !== serializeFilterValue(filter.value)) {
+      return filter.id
+    }
+  }
+
+  for (const filter of currentFilters) {
+    if (!nextById.has(filter.id)) return filter.id
+  }
+
+  return null
+}
+
+/**
  * Main datatable component.
  * Renders a TanStack Table with sorting, filtering, column visibility,
  * and inline-editable cells for Info, BRL cost, and avg price seed.
@@ -249,6 +281,7 @@ export function DataTable({ data }: DataTableProps) {
   const [sorting, setSorting] = useState<SortingState>([])
   const [editRow, setEditRow] = useState<CryptoComRow | null>(null)
   const [deleteOrder, setDeleteOrder] = useState<number | null>(null)
+  const [lastChangedFilterId, setLastChangedFilterId] = useState<string | null>(null)
   const tableFilters = useAppStore(s => s.tableFilters)
   const setTableFilters = useAppStore(s => s.setTableFilters)
   const columnFilters: ColumnFiltersState = tableFilters
@@ -307,6 +340,8 @@ export function DataTable({ data }: DataTableProps) {
   const setColumnFilters = useCallback((updater: ColumnFiltersState | ((old: ColumnFiltersState) => ColumnFiltersState)) => {
     const currentFilters: ColumnFiltersState = useAppStore.getState().tableFilters
     const next = typeof updater === 'function' ? updater(currentFilters) : updater
+    const changedFilterId = getChangedFilterId(currentFilters, next)
+    setLastChangedFilterId(next.length > 0 ? changedFilterId : null)
     setTableFilters(toSerializableTableFilters(next))
   }, [setTableFilters])
 
@@ -342,6 +377,8 @@ export function DataTable({ data }: DataTableProps) {
     31,
   )
   const hasNoFilterResults = columnFilters.length > 0 && table.getRowModel().rows.length === 0
+  const activeFilterIds = new Set(columnFilters.map(filter => filter.id))
+  const hasKnownZeroResultFilter = lastChangedFilterId !== null && activeFilterIds.has(lastChangedFilterId)
 
   return (
     <div className="h-full overflow-auto">
@@ -404,7 +441,13 @@ export function DataTable({ data }: DataTableProps) {
                           }[header.column.getIsSorted() as string] ?? null}
                         </div>
                         {header.column.getCanFilter() && (
-                          <ColumnFilter column={header.column} hasNoFilterResults={hasNoFilterResults} />
+                          <ColumnFilter
+                            column={header.column}
+                            hasNoFilterResults={
+                              hasNoFilterResults &&
+                              (!hasKnownZeroResultFilter || lastChangedFilterId === header.column.id)
+                            }
+                          />
                         )}
                       </div>
                     )}
