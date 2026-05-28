@@ -1,6 +1,7 @@
 import type { CryptoComRow } from '../types/transaction'
 import type { PtaxMap } from '../types/ptax'
-import type { AppSettings } from '../types/app'
+import type { AppSettings, TableFilterState } from '../types/app'
+import { normalizeTableFilters } from './tableFilters'
 
 const STORAGE_KEY = 'crypto-avg-price-session'
 const SCHEMA_VERSION = 2
@@ -15,6 +16,7 @@ interface PersistedState {
   rawTransactions: CryptoComRow[]
   ptaxEntries: [string, number][]
   settings: AppSettings
+  tableFilters?: TableFilterState[]
 }
 
 /**
@@ -22,11 +24,13 @@ interface PersistedState {
  * @param rawTransactions - All raw transaction rows (with overrides embedded)
  * @param ptaxMap - PTAX rate map
  * @param settings - App settings
+ * @param tableFilters - Applied table filters kept as session-only UI state
  */
 export function saveSession(
   rawTransactions: CryptoComRow[],
   ptaxMap: PtaxMap,
   settings: AppSettings,
+  tableFilters: TableFilterState[] = [],
 ): void {
   try {
     const state: PersistedState = {
@@ -35,6 +39,7 @@ export function saveSession(
       rawTransactions,
       ptaxEntries: Array.from(ptaxMap.entries()),
       settings,
+      tableFilters,
     }
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
   } catch {
@@ -50,6 +55,7 @@ export function loadSession(): {
   rawTransactions: CryptoComRow[]
   ptaxMap: PtaxMap
   settings: AppSettings
+  tableFilters: TableFilterState[]
   timestamp: number
 } | null {
   try {
@@ -68,6 +74,7 @@ export function loadSession(): {
       rawTransactions: state.rawTransactions,
       ptaxMap: new Map(state.ptaxEntries),
       settings: state.settings,
+      tableFilters: normalizeTableFilters(state.tableFilters),
       timestamp: state.timestamp,
     }
   } catch {

@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import type { CryptoComRow } from '../types/transaction'
 import type { PtaxMap } from '../types/ptax'
-import { getVisibleStickyColumns, type AppSettings, type AssetGroup, type TableLayoutSettings } from '../types/app'
+import { getVisibleStickyColumns, type AppSettings, type AssetGroup, type TableFilterState, type TableLayoutSettings } from '../types/app'
 import { parseCryptoComCsv } from '../parsers/cryptoCom'
 import { parsePtaxCsv, mergePtaxMaps } from '../parsers/ptax'
 import { parseExportedCsv } from '../parsers/outputCsv'
@@ -48,6 +48,7 @@ interface AppState {
   ptaxMap: PtaxMap
   settings: AppSettings
   tableLayoutPreview: TableLayoutSettings | null
+  tableFilters: TableFilterState[]
   activeTableFilters: ActiveTableFilter[]
   activeTableRowOrders: number[] | null
   backupImportHasSettingsConfig: boolean
@@ -74,12 +75,14 @@ interface AppState {
   setTableLayoutPreview: (layout: TableLayoutSettings | null) => void
   commitColumnLayout: (layout: TableLayoutSettings) => void
   resetColumnLayout: () => void
+  setTableFilters: (filters: TableFilterState[]) => void
   setActiveTableFilters: (filters: ActiveTableFilter[]) => void
   setActiveTableRowOrders: (orders: number[]) => void
   restoreSession: (state: {
     rawTransactions: CryptoComRow[]
     ptaxMap: PtaxMap
     settings: AppSettings
+    tableFilters: TableFilterState[]
   }) => void
   clearAll: () => void
 }
@@ -176,7 +179,12 @@ function flushPersist(): void {
     persistTimer = null
   }
   if (pendingState) {
-    saveSession(pendingState.rawTransactions, pendingState.ptaxMap, pendingState.settings)
+    saveSession(
+      pendingState.rawTransactions,
+      pendingState.ptaxMap,
+      pendingState.settings,
+      pendingState.tableFilters,
+    )
     pendingState = null
   }
 }
@@ -195,6 +203,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
   ptaxMap: new Map(),
   settings: { ...defaultSettings },
   tableLayoutPreview: null,
+  tableFilters: [],
   activeTableFilters: [],
   activeTableRowOrders: null,
   backupImportHasSettingsConfig: false,
@@ -293,6 +302,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
           ptaxMap,
           settings: nextSettings,
           tableLayoutPreview: null,
+          tableFilters: [],
           activeTableFilters: [],
           activeTableRowOrders: null,
           backupImportHasSettingsConfig: settings !== null,
@@ -443,6 +453,11 @@ export const useAppStore = create<AppState>()((set, get) => ({
     persist(get())
   },
 
+  setTableFilters(filters: TableFilterState[]) {
+    set({ tableFilters: filters })
+    persist(get())
+  },
+
   setActiveTableFilters(filters: ActiveTableFilter[]) {
     set({ activeTableFilters: filters })
   },
@@ -456,6 +471,9 @@ export const useAppStore = create<AppState>()((set, get) => ({
       rawTransactions: restored.rawTransactions,
       ptaxMap: restored.ptaxMap,
       tableLayoutPreview: null,
+      tableFilters: restored.tableFilters,
+      activeTableFilters: [],
+      activeTableRowOrders: null,
       backupImportHasSettingsConfig: false,
       settings: normalizeAppSettings(restored.settings),
     })
@@ -467,6 +485,7 @@ export const useAppStore = create<AppState>()((set, get) => ({
       ptaxMap: new Map(),
       settings: { ...defaultSettings },
       tableLayoutPreview: null,
+      tableFilters: [],
       activeTableFilters: [],
       activeTableRowOrders: null,
       backupImportHasSettingsConfig: false,
