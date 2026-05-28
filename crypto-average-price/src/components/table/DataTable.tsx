@@ -341,6 +341,7 @@ export function DataTable({ data }: DataTableProps) {
     'var(--color-surface-2)',
     31,
   )
+  const hasNoFilterResults = columnFilters.length > 0 && table.getRowModel().rows.length === 0
 
   return (
     <div className="h-full overflow-auto">
@@ -403,7 +404,7 @@ export function DataTable({ data }: DataTableProps) {
                           }[header.column.getIsSorted() as string] ?? null}
                         </div>
                         {header.column.getCanFilter() && (
-                          <ColumnFilter column={header.column} />
+                          <ColumnFilter column={header.column} hasNoFilterResults={hasNoFilterResults} />
                         )}
                       </div>
                     )}

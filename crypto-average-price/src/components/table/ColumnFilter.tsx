@@ -3,6 +3,7 @@ import type { Column } from '@tanstack/react-table'
 
 interface ColumnFilterProps<T> {
   column: Column<T, unknown>
+  hasNoFilterResults: boolean
 }
 
 interface MultiSelectFilterValue {
@@ -24,20 +25,41 @@ interface ColumnFilterMeta {
  * @param props - Table column to filter
  * @returns Filter control element for the column metadata
  */
-export function ColumnFilter<T>({ column }: ColumnFilterProps<T>) {
+export function ColumnFilter<T>({ column, hasNoFilterResults }: ColumnFilterProps<T>) {
   const rawFilterValue = column.getFilterValue() as ColumnFilterValue | undefined
   const filterValue = typeof rawFilterValue === 'string' ? rawFilterValue : ''
   const meta = column.columnDef.meta as ColumnFilterMeta | undefined
 
   if (meta?.filterType === 'multiselect') {
-    return <MultiSelectFilter column={column} filterValue={rawFilterValue} meta={meta} />
+    return (
+      <MultiSelectFilter
+        column={column}
+        filterValue={rawFilterValue}
+        hasNoFilterResults={hasNoFilterResults}
+        meta={meta}
+      />
+    )
   }
 
   if (meta?.filterType !== 'combo') {
-  return <TextFilter key={filterValue} column={column} filterValue={filterValue} />
+    return (
+      <TextFilter
+        key={filterValue}
+        column={column}
+        filterValue={filterValue}
+        hasNoFilterResults={hasNoFilterResults}
+      />
+    )
   }
 
-  return <ComboFilter key={filterValue} column={column} filterValue={filterValue} />
+  return (
+    <ComboFilter
+      key={filterValue}
+      column={column}
+      filterValue={filterValue}
+      hasNoFilterResults={hasNoFilterResults}
+    />
+  )
 }
 
 /**
@@ -87,8 +109,21 @@ function getUniqueFilterOptionValues<T>(column: Column<T, unknown>, meta: Column
  * @param props - Table column and current committed filter value
  * @returns Text filter input element
  */
-function TextFilter<T>({ column, filterValue }: { column: Column<T, unknown>; filterValue: string }) {
+function TextFilter<T>({
+  column,
+  filterValue,
+  hasNoFilterResults,
+}: {
+  column: Column<T, unknown>
+  filterValue: string
+  hasNoFilterResults: boolean
+}) {
   const [inputValue, setInputValue] = useState(filterValue)
+  const filterClass = filterValue
+    ? hasNoFilterResults
+      ? 'border-danger/60 text-danger focus:border-danger'
+      : 'border-accent/60 text-accent focus:border-accent'
+    : 'border-border text-text-secondary focus:border-accent/50'
 
   useEffect(() => {
     const timeout = window.setTimeout(() => {
@@ -103,7 +138,7 @@ function TextFilter<T>({ column, filterValue }: { column: Column<T, unknown>; fi
       value={inputValue}
       onChange={e => setInputValue(e.target.value)}
       placeholder="Filter..."
-      className="w-full bg-surface-2 border border-border rounded px-1.5 py-0.5 text-xs text-text-secondary outline-none focus:border-accent/50 placeholder:text-text-muted"
+      className={`w-full bg-surface-2 border rounded px-1.5 py-0.5 text-xs outline-none placeholder:text-text-muted ${filterClass}`}
     />
   )
 }
@@ -113,10 +148,23 @@ function TextFilter<T>({ column, filterValue }: { column: Column<T, unknown>; fi
  * @param props - Table column and current committed filter value
  * @returns Combo filter element
  */
-function ComboFilter<T>({ column, filterValue }: { column: Column<T, unknown>; filterValue: string }) {
+function ComboFilter<T>({
+  column,
+  filterValue,
+  hasNoFilterResults,
+}: {
+  column: Column<T, unknown>
+  filterValue: string
+  hasNoFilterResults: boolean
+}) {
   const [open, setOpen] = useState(false)
   const [inputValue, setInputValue] = useState(filterValue)
   const ref = useRef<HTMLDivElement>(null)
+  const filterClass = filterValue
+    ? hasNoFilterResults
+      ? 'border-danger/60 text-danger focus:border-danger'
+      : 'border-accent/60 text-accent focus:border-accent'
+    : 'border-border text-text-secondary focus:border-accent/50'
 
   useEffect(() => {
     if (!open) return
@@ -169,7 +217,7 @@ function ComboFilter<T>({ column, filterValue }: { column: Column<T, unknown>; f
         onChange={e => handleInput(e.target.value)}
         onFocus={() => setOpen(true)}
         placeholder="Filter..."
-        className="w-full bg-surface-2 border border-border rounded px-1.5 py-0.5 text-xs text-text-secondary outline-none focus:border-accent/50 placeholder:text-text-muted"
+        className={`w-full bg-surface-2 border rounded px-1.5 py-0.5 text-xs outline-none placeholder:text-text-muted ${filterClass}`}
       />
       {open && filtered.length > 0 && (
         <div className="absolute top-full left-0 mt-0.5 bg-surface-2 border border-border rounded shadow-lg z-30 max-h-[200px] overflow-y-auto flex flex-col min-w-full w-max">
@@ -206,10 +254,12 @@ function ComboFilter<T>({ column, filterValue }: { column: Column<T, unknown>; f
 function MultiSelectFilter<T>({
   column,
   filterValue,
+  hasNoFilterResults,
   meta,
 }: {
   column: Column<T, unknown>
   filterValue: ColumnFilterValue | undefined
+  hasNoFilterResults: boolean
   meta: ColumnFilterMeta
 }) {
   const [open, setOpen] = useState(false)
@@ -262,9 +312,12 @@ function MultiSelectFilter<T>({
       ? 'None'
       : `${selectedValues.length} selected`
   const label = textValue.trim() ? `${baseLabel} + date` : baseLabel
-  const filterButtonClass = hasActiveFilter
-    ? 'w-full bg-accent/15 border border-accent/60 rounded px-1.5 py-0.5 text-left text-xs text-accent outline-none hover:border-accent hover:bg-accent/20 focus:border-accent'
-    : 'w-full bg-surface-2 border border-border rounded px-1.5 py-0.5 text-left text-xs text-text-secondary outline-none hover:border-border-light focus:border-accent/50'
+  const hasEmptyResults = noneSelected || (hasActiveFilter && hasNoFilterResults)
+  const filterButtonClass = hasEmptyResults
+    ? 'w-full bg-danger/20 border border-danger/60 rounded px-1.5 py-0.5 text-left text-xs text-danger outline-none hover:border-danger focus:border-danger'
+    : hasActiveFilter
+      ? 'w-full bg-accent/15 border border-accent/60 rounded px-1.5 py-0.5 text-left text-xs text-accent outline-none hover:border-accent hover:bg-accent/20 focus:border-accent'
+      : 'w-full bg-surface-2 border border-border rounded px-1.5 py-0.5 text-left text-xs text-text-secondary outline-none hover:border-border-light focus:border-accent/50'
 
   /**
    * Commits selected filter values, clearing the filter when all values are selected.
