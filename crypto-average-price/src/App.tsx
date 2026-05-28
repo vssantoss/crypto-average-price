@@ -15,7 +15,7 @@ import { AddRowDialog } from './components/dialogs/AddRowDialog'
 import { ImportTransactionsDialog } from './components/dialogs/ImportTransactionsDialog'
 import { Dialog, DialogFooter, dialogCancelClass, dialogPrimaryClass } from './components/common/Dialog'
 import { usePromiseDialog } from './hooks/usePromiseDialog'
-import { AlertTriangle, Trash2, ChevronDown, ChevronUp, FileUp, FolderInput, FileSpreadsheet, Plus } from 'lucide-react'
+import { AlertTriangle, Trash2, ChevronDown, ChevronUp, FileUp, FolderInput, FileSpreadsheet, Plus, X } from 'lucide-react'
 
 function App() {
   const { processedRows, allProcessedRows, ptaxWarnings, diagnostics } = useAppComputedData()
@@ -23,6 +23,8 @@ function App() {
   const isLoading = useAppStore(s => s.isLoading)
   const hasData = useAppStore(s => s.rawTransactions.length > 0)
   const clearAll = useAppStore(s => s.clearAll)
+  const hasActiveFilters = useAppStore(s => s.tableFilters.length > 0)
+  const setTableFilters = useAppStore(s => s.setTableFilters)
   const ptaxSize = useAppStore(s => s.ptaxMap.size)
   const importPtax = useAppStore(s => s.importPtax)
   const importExported = useAppStore(s => s.importExported)
@@ -232,6 +234,16 @@ function App() {
               <Plus size={13} />
               Add Transaction
             </button>
+
+            {hasActiveFilters && (
+              <button
+                onClick={() => setTableFilters([])}
+                className="flex items-center gap-1.5 bg-accent/10 border border-accent/30 rounded px-2.5 py-1 text-xs text-accent hover:bg-accent/20 transition-colors"
+              >
+                <X size={13} />
+                Clear Filters
+              </button>
+            )}
 
             <div className="flex-1" />
 

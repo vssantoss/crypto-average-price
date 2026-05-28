@@ -24,7 +24,7 @@ import { EditableCell } from './EditableCell'
 import { AddRowDialog } from '../dialogs/AddRowDialog'
 import { Dialog, DialogFooter, dialogCancelClass, dialogDangerClass } from '../common/Dialog'
 import type { CryptoComRow } from '../../types/transaction'
-import { AlertTriangle, ArrowUp, ArrowDown, Pencil, Trash2, X } from 'lucide-react'
+import { AlertTriangle, ArrowUp, ArrowDown, Pencil, Trash2 } from 'lucide-react'
 
 const caseInsensitiveFilter: FilterFn<ProcessedRow> = (row, columnId, filterValue) => {
   const value = String(row.getValue(columnId) ?? '').toLowerCase()
@@ -300,8 +300,6 @@ export function DataTable({ data }: DataTableProps) {
       .map(f => ({ column: headerMap[f.id] || f.id, value: formatActiveFilterValue(f.value) }))
       .filter(f => f.value)
   }, [columnFilters, headerMap])
-  const hasActiveFilters = columnFilters.length > 0
-
   useEffect(() => {
     setActiveTableFilters(activeFilters)
   }, [activeFilters, setActiveTableFilters])
@@ -311,13 +309,6 @@ export function DataTable({ data }: DataTableProps) {
     const next = typeof updater === 'function' ? updater(currentFilters) : updater
     setTableFilters(toSerializableTableFilters(next))
   }, [setTableFilters])
-
-  /**
-   * Clears every table column filter.
-   */
-  function clearFilters(): void {
-    setColumnFilters([])
-  }
 
   // TanStack Table returns non-memoizable functions; the table instance is still the intended API boundary here.
   // eslint-disable-next-line react-hooks/incompatible-library
@@ -386,16 +377,6 @@ export function DataTable({ data }: DataTableProps) {
                 className="w-[40px] min-w-[40px] px-0 py-2 border-b border-border"
                 style={actionHeaderSticky.style}
               >
-                {hasActiveFilters && (
-                  <button
-                    onClick={clearFilters}
-                    className="mx-auto flex h-6 w-6 items-center justify-center rounded border border-border bg-surface-1 text-text-muted transition-colors hover:border-border-light hover:text-text-primary"
-                    title="Clear filters"
-                    aria-label="Clear filters"
-                  >
-                    <X size={13} />
-                  </button>
-                )}
               </th>
               {headerGroup.headers.map(header => {
                 const meta = header.column.columnDef.meta as TableColumnMeta | undefined
