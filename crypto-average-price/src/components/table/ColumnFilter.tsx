@@ -255,14 +255,15 @@ function MultiSelectFilter<T>({
   const selectedSet = useMemo(() => new Set(selectedValues), [selectedValues])
   const allSelected = uniqueValues.length > 0 && selectedValues.length === uniqueValues.length
   const noneSelected = selectedValues.length === 0
+  const hasActiveFilter = !allSelected || !!textValue.trim()
   const baseLabel = allSelected
     ? 'All'
     : noneSelected
       ? 'None'
       : `${selectedValues.length} selected`
   const label = textValue.trim() ? `${baseLabel} + date` : baseLabel
-  const filterButtonClass = noneSelected
-    ? 'w-full bg-danger/20 border border-danger/60 rounded px-1.5 py-0.5 text-left text-xs text-danger outline-none hover:border-danger focus:border-danger'
+  const filterButtonClass = hasActiveFilter
+    ? 'w-full bg-accent/15 border border-accent/60 rounded px-1.5 py-0.5 text-left text-xs text-accent outline-none hover:border-accent hover:bg-accent/20 focus:border-accent'
     : 'w-full bg-surface-2 border border-border rounded px-1.5 py-0.5 text-left text-xs text-text-secondary outline-none hover:border-border-light focus:border-accent/50'
 
   /**
