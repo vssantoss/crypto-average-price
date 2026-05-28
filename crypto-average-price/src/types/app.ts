@@ -12,6 +12,22 @@ export interface TableLayoutSettings {
 }
 
 /**
+ * Serializable table filter value shapes supported by the table UI.
+ */
+export type TableFilterValue = string | string[] | {
+  values?: string[]
+  text?: string
+}
+
+/**
+ * Serializable table filter state persisted in the browser session.
+ */
+export interface TableFilterState {
+  id: string
+  value: TableFilterValue
+}
+
+/**
  * User-defined group of exchange-reported instruments that calculate as one asset.
  */
 export interface AssetGroup {

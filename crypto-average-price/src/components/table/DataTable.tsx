@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, type CSSProperties } from 'react'
+import { useState, useMemo, useEffect, useCallback, type CSSProperties } from 'react'
 import {
   useReactTable,
   getCoreRowModel,
@@ -17,6 +17,7 @@ import type { ProcessedRow } from '../../types/transaction'
 import { JournalType, OnchainWithdrawalRole } from '../../types/transaction'
 import { useAppStore } from '../../store/useAppStore'
 import { TABLE_ACTIONS_COLUMN_ID } from '../../types/app'
+import { toSerializableTableFilters } from '../../utils/tableFilters'
 import { createColumns } from './columns'
 import { ColumnFilter } from './ColumnFilter'
 import { EditableCell } from './EditableCell'
@@ -246,9 +247,11 @@ function formatActiveFilterValue(value: unknown): string {
  */
 export function DataTable({ data }: DataTableProps) {
   const [sorting, setSorting] = useState<SortingState>([])
-  const [columnFilters, setColumnFiltersRaw] = useState<ColumnFiltersState>([])
   const [editRow, setEditRow] = useState<CryptoComRow | null>(null)
   const [deleteOrder, setDeleteOrder] = useState<number | null>(null)
+  const tableFilters = useAppStore(s => s.tableFilters)
+  const setTableFilters = useAppStore(s => s.setTableFilters)
+  const columnFilters: ColumnFiltersState = tableFilters
   const tableLayoutPreview = useAppStore(s => s.tableLayoutPreview)
   const savedColumnVisibility = useAppStore(s => s.settings.columnVisibility)
   const savedStickyColumns = useAppStore(s => s.settings.stickyColumns)
@@ -303,18 +306,17 @@ export function DataTable({ data }: DataTableProps) {
     setActiveTableFilters(activeFilters)
   }, [activeFilters, setActiveTableFilters])
 
-  const setColumnFilters = (updater: ColumnFiltersState | ((old: ColumnFiltersState) => ColumnFiltersState)) => {
-    setColumnFiltersRaw(prev => {
-      const next = typeof updater === 'function' ? updater(prev) : updater
-      return next
-    })
-  }
+  const setColumnFilters = useCallback((updater: ColumnFiltersState | ((old: ColumnFiltersState) => ColumnFiltersState)) => {
+    const currentFilters: ColumnFiltersState = useAppStore.getState().tableFilters
+    const next = typeof updater === 'function' ? updater(currentFilters) : updater
+    setTableFilters(toSerializableTableFilters(next))
+  }, [setTableFilters])
 
   /**
    * Clears every table column filter.
    */
   function clearFilters(): void {
-    setColumnFiltersRaw([])
+    setColumnFilters([])
   }
 
   // TanStack Table returns non-memoizable functions; the table instance is still the intended API boundary here.
