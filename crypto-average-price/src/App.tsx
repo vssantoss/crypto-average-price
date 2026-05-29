@@ -17,7 +17,14 @@ import { Dialog, DialogFooter, dialogCancelClass, dialogPrimaryClass } from './c
 import { usePromiseDialog } from './hooks/usePromiseDialog'
 import { AlertTriangle, Trash2, ChevronDown, ChevronUp, FileUp, FolderInput, FileSpreadsheet, Plus, X } from 'lucide-react'
 
+/**
+ * Renders the application shell, import controls, dialogs, and transaction table.
+ * @returns The root React application UI.
+ */
 function App() {
+  const runtimeParams = new URLSearchParams(window.location.search)
+  const isElectronRuntime = runtimeParams.get('runtime') === 'electron'
+  const electronPlatform = runtimeParams.get('platform') || 'unknown'
   const { processedRows, allProcessedRows, ptaxWarnings, diagnostics } = useAppComputedData()
   const error = useAppStore(s => s.error)
   const isLoading = useAppStore(s => s.isLoading)
@@ -141,13 +148,13 @@ function App() {
       )}
 
       {/* Fixed top bar */}
-      <header className="bg-surface-1 border-b border-border shrink-0 z-40">
+      <header className={`bg-surface-1 border-b border-border shrink-0 z-40 ${isElectronRuntime ? `electron-app-header electron-app-header-${electronPlatform}` : ''}`}>
         {/* Main bar row */}
-        <div className="flex items-center justify-between h-10 px-3">
+        <div className={`flex items-center justify-between h-10 px-3 ${isElectronRuntime ? 'electron-titlebar-row' : ''}`}>
           <div className="flex items-center gap-2">
             <h1 className="text-sm font-semibold text-text-primary">Crypto Average Price</h1>
           </div>
-          <div className="flex items-center gap-2">
+          <div className={`flex items-center gap-2 ${isElectronRuntime ? 'electron-titlebar-actions' : ''}`}>
             <input ref={txRef} type="file" accept=".csv" multiple className="hidden" onChange={e => {
               const files = e.target.files
               if (files && files.length > 0) handleImportTransactions(files)

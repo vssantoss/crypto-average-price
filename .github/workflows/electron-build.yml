@@ -1,0 +1,75 @@
+name: Electron Build
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows x64
+            runner: windows-latest
+            command: electron:dist:win
+            arch: x64
+          - name: Windows arm64
+            runner: windows-11-arm
+            command: electron:dist:win
+            arch: arm64
+          - name: macOS x64
+            runner: macos-15-intel
+            command: electron:dist:mac
+            arch: x64
+          - name: macOS arm64
+            runner: macos-15
+            command: electron:dist:mac
+            arch: arm64
+          - name: Linux x64
+            runner: ubuntu-latest
+            command: electron:dist:linux
+            arch: x64
+          - name: Linux arm64
+            runner: ubuntu-24.04-arm
+            command: electron:dist:linux
+            arch: arm64
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Enable pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@11.1.3 --activate
+
+      - name: Install root dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install web app dependencies
+        run: pnpm run install:web
+
+      - name: Lint web app
+        run: pnpm --dir crypto-average-price lint
+
+      - name: Build Electron artifact
+        run: pnpm ${{ matrix.command }} -- --${{ matrix.arch }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: crypto-average-price-${{ matrix.name }}
+          path: |
+            release/*.zip
+            release/*.tar.gz
+          if-no-files-found: error

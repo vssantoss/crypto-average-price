@@ -37,6 +37,28 @@ body {
   flex-direction: column;
 }
 
+.electron-titlebar-row {
+  -webkit-app-region: drag;
+  app-region: drag;
+}
+
+.electron-titlebar-row :is(button, input, select, textarea, a, label, [role='button']) {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+.electron-titlebar-actions {
+  padding-right: 138px;
+}
+
+.electron-app-header-darwin .electron-titlebar-row {
+  padding-left: 78px;
+}
+
+.electron-app-header-darwin .electron-titlebar-actions {
+  padding-right: 0;
+}
+
 /* Scrollbar styling */
 ::-webkit-scrollbar {
   width: 8px;

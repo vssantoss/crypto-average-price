@@ -94,6 +94,26 @@ cd crypto-average-price
 pnpm lint
 ```
 
+## Desktop App
+
+The Electron wrapper lives at the repository root and packages the web app from `crypto-average-price/dist`.
+
+Start the desktop app in development:
+
+```sh
+pnpm electron:dev
+```
+
+Build unsigned portable desktop archives:
+
+```sh
+pnpm electron:dist:win -- --x64
+pnpm electron:dist:mac -- --arm64
+pnpm electron:dist:linux -- --x64
+```
+
+Generated desktop artifacts are written to `release/`. GitHub Actions can build Windows, macOS, and Linux archives for both x64 and arm64 from the `Electron Build` workflow.
+
 ## Input Files
 
 Transaction imports expect Crypto.com transaction report CSV files with columns such as `Order`, `Journal ID`, `Time (UTC)`, `Event Date`, `Journal Type`, `Instrument`, `Side`, `Transaction Quantity`, and `Transaction Cost`.
