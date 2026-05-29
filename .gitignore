@@ -7,10 +7,12 @@ dist/
 dist-ssr/
 build/
 coverage/
+release/
 **/dist/
 **/dist-ssr/
 **/build/
 **/coverage/
+**/release/
 
 # Logs
 logs/
