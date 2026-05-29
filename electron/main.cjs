@@ -51,7 +51,18 @@ function createMainWindow() {
   });
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    void shell.openExternal(url);
+    let protocol;
+
+    try {
+      ({ protocol } = new URL(url));
+    } catch {
+      return { action: 'deny' };
+    }
+
+    if (protocol === 'https:' || protocol === 'http:') {
+      void shell.openExternal(url);
+    }
+
     return { action: 'deny' };
   });
 

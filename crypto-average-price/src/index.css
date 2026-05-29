@@ -42,8 +42,7 @@ body {
   app-region: drag;
 }
 
-.electron-titlebar-row button,
-.electron-titlebar-row input {
+.electron-titlebar-row :is(button, input, select, textarea, a, label, [role='button']) {
   -webkit-app-region: no-drag;
   app-region: no-drag;
 }
