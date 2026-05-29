@@ -29,6 +29,16 @@ function createMainWindow() {
     minHeight: 720,
     backgroundColor: '#0f172a',
     show: false,
+    titleBarStyle: 'hidden',
+    ...(process.platform === 'darwin'
+      ? { trafficLightPosition: { x: 12, y: 12 } }
+      : {
+          titleBarOverlay: {
+            color: '#111318',
+            symbolColor: '#e8eaf0',
+            height: 40,
+          },
+        }),
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
@@ -46,9 +56,17 @@ function createMainWindow() {
   });
 
   if (devServerUrl) {
-    void mainWindow.loadURL(getRendererEntry());
+    const rendererUrl = new URL(getRendererEntry());
+    rendererUrl.searchParams.set('runtime', 'electron');
+    rendererUrl.searchParams.set('platform', process.platform);
+    void mainWindow.loadURL(rendererUrl.toString());
   } else {
-    void mainWindow.loadFile(getRendererEntry());
+    void mainWindow.loadFile(getRendererEntry(), {
+      query: {
+        runtime: 'electron',
+        platform: process.platform,
+      },
+    });
   }
 
   return mainWindow;
