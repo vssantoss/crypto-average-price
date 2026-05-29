@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -43,18 +43,9 @@ function startProcess(command, args, options) {
  * @returns {void}
  */
 function stopProcess(childProcess) {
-  if (!childProcess || childProcess.killed || childProcess.exitCode !== null) {
-    return;
+  if (childProcess && !childProcess.killed && childProcess.exitCode === null) {
+    childProcess.kill();
   }
-
-  if (process.platform === 'win32' && childProcess.pid) {
-    spawnSync('taskkill', ['/pid', String(childProcess.pid), '/t', '/f'], {
-      stdio: 'ignore',
-    });
-    return;
-  }
-
-  childProcess.kill();
 }
 
 /**
