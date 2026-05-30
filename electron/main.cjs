@@ -58,6 +58,21 @@ function hasValidWindowBounds(bounds) {
 }
 
 /**
+ * Checks whether saved content size is numerically valid and large enough to restore.
+ * @param {unknown} size - Saved content size value to validate.
+ * @returns {boolean} True when the content size can be restored.
+ */
+function hasValidContentSize(size) {
+  return Boolean(
+    size
+    && isFiniteNumber(size.width)
+    && isFiniteNumber(size.height)
+    && size.width >= minimumWindowWidth
+    && size.height >= minimumWindowHeight,
+  );
+}
+
+/**
  * Checks whether saved bounds overlap a display work area enough to be reachable.
  * @param {{x: number, y: number, width: number, height: number}} bounds - Bounds to test.
  * @param {Electron.Display} display - Display whose work area should contain the window.
@@ -81,13 +96,14 @@ function boundsAreVisible(bounds) {
 }
 
 /**
- * Loads persisted window bounds and maximized state when they are valid.
- * @returns {{bounds: {x: number, y: number, width: number, height: number}, maximized: boolean} | null} Saved state, or null when unavailable.
+ * Loads persisted window bounds, optional content size, and maximized state when they are valid.
+ * @returns {{bounds: {x: number, y: number, width: number, height: number}, contentSize: {width: number, height: number} | null, maximized: boolean} | null} Saved state, or null when unavailable.
  */
 function loadWindowState() {
   try {
     const rawState = fs.readFileSync(getWindowStatePath(), 'utf8');
     const state = JSON.parse(rawState);
+    const contentSize = hasValidContentSize(state.contentSize) ? state.contentSize : null;
 
     if (!hasValidWindowBounds(state.bounds) || !boundsAreVisible(state.bounds)) {
       return null;
@@ -95,6 +111,7 @@ function loadWindowState() {
 
     return {
       bounds: state.bounds,
+      contentSize,
       maximized: state.maximized === true,
     };
   } catch {
@@ -103,7 +120,7 @@ function loadWindowState() {
 }
 
 /**
- * Gets restorable normal bounds from a BrowserWindow.
+ * Gets restorable normal outer bounds from a BrowserWindow.
  * @param {BrowserWindow} window - Window whose last normal bounds should be saved.
  * @returns {{x: number, y: number, width: number, height: number}} Bounds suitable for future restoration.
  */
@@ -116,6 +133,21 @@ function getRestorableWindowBounds(window) {
 }
 
 /**
+ * Gets the current content size for stable cross-launch restoration.
+ * @param {BrowserWindow} window - Window whose content size should be saved.
+ * @returns {{width: number, height: number} | null} Content size suitable for future restoration, or null for non-normal window states.
+ */
+function getRestorableContentSize(window) {
+  if (window.isMaximized() || window.isMinimized() || window.isFullScreen()) {
+    return null;
+  }
+
+  const [width, height] = window.getContentSize();
+
+  return { width, height };
+}
+
+/**
  * Persists the BrowserWindow size, position, and maximized state.
  * @param {BrowserWindow} window - Window whose state should be persisted.
  * @returns {void}
@@ -125,6 +157,7 @@ function saveWindowState(window) {
     const windowStatePath = getWindowStatePath();
     const state = {
       bounds: getRestorableWindowBounds(window),
+      contentSize: getRestorableContentSize(window),
       maximized: window.isMaximized(),
     };
 
@@ -142,12 +175,14 @@ function saveWindowState(window) {
 function createMainWindow() {
   const windowState = loadWindowState();
   const windowBounds = windowState?.bounds;
+  const contentSize = windowState?.contentSize;
   const mainWindow = new BrowserWindow({
     title: appName,
     x: windowBounds?.x,
     y: windowBounds?.y,
-    width: windowBounds?.width ?? defaultWindowWidth,
-    height: windowBounds?.height ?? defaultWindowHeight,
+    width: contentSize?.width ?? windowBounds?.width ?? defaultWindowWidth,
+    height: contentSize?.height ?? windowBounds?.height ?? defaultWindowHeight,
+    useContentSize: Boolean(contentSize),
     minWidth: minimumWindowWidth,
     minHeight: minimumWindowHeight,
     backgroundColor: '#0f172a',
