@@ -58,21 +58,6 @@ function hasValidWindowBounds(bounds) {
 }
 
 /**
- * Checks whether saved content size is numerically valid and large enough to restore.
- * @param {unknown} size - Saved content size value to validate.
- * @returns {boolean} True when the content size can be restored.
- */
-function hasValidContentSize(size) {
-  return Boolean(
-    size
-    && isFiniteNumber(size.width)
-    && isFiniteNumber(size.height)
-    && size.width >= minimumWindowWidth
-    && size.height >= minimumWindowHeight,
-  );
-}
-
-/**
  * Checks whether saved bounds overlap a display work area enough to be reachable.
  * @param {{x: number, y: number, width: number, height: number}} bounds - Bounds to test.
  * @param {Electron.Display} display - Display whose work area should contain the window.
@@ -96,14 +81,13 @@ function boundsAreVisible(bounds) {
 }
 
 /**
- * Loads persisted window bounds, optional content size, and maximized state when they are valid.
- * @returns {{bounds: {x: number, y: number, width: number, height: number}, contentSize: {width: number, height: number} | null, maximized: boolean} | null} Saved state, or null when unavailable.
+ * Loads persisted window bounds and maximized state when they are valid.
+ * @returns {{bounds: {x: number, y: number, width: number, height: number}, maximized: boolean} | null} Saved state, or null when unavailable.
  */
 function loadWindowState() {
   try {
     const rawState = fs.readFileSync(getWindowStatePath(), 'utf8');
     const state = JSON.parse(rawState);
-    const contentSize = hasValidContentSize(state.contentSize) ? state.contentSize : null;
 
     if (!hasValidWindowBounds(state.bounds) || !boundsAreVisible(state.bounds)) {
       return null;
@@ -111,7 +95,6 @@ function loadWindowState() {
 
     return {
       bounds: state.bounds,
-      contentSize,
       maximized: state.maximized === true,
     };
   } catch {
@@ -133,33 +116,22 @@ function getRestorableWindowBounds(window) {
 }
 
 /**
- * Gets the current content size for stable cross-launch restoration.
- * @param {BrowserWindow} window - Window whose content size should be saved.
- * @returns {{width: number, height: number} | null} Content size suitable for future restoration, or null for non-normal window states.
+ * Checks whether the window is in a normal state that should update restorable bounds.
+ * @param {BrowserWindow} window - Window whose state should be checked.
+ * @returns {boolean} True when current bounds are safe to persist.
  */
-function getRestorableContentSize(window) {
-  if (window.isMaximized() || window.isMinimized() || window.isFullScreen()) {
-    return null;
-  }
-
-  const [width, height] = window.getContentSize();
-
-  return { width, height };
+function hasRestorableWindowState(window) {
+  return !window.isMaximized() && !window.isMinimized() && !window.isFullScreen();
 }
 
 /**
  * Persists the BrowserWindow size, position, and maximized state.
- * @param {BrowserWindow} window - Window whose state should be persisted.
+ * @param {{bounds: {x: number, y: number, width: number, height: number}, maximized: boolean}} state - Window state to persist.
  * @returns {void}
  */
-function saveWindowState(window) {
+function writeWindowState(state) {
   try {
     const windowStatePath = getWindowStatePath();
-    const state = {
-      bounds: getRestorableWindowBounds(window),
-      contentSize: getRestorableContentSize(window),
-      maximized: window.isMaximized(),
-    };
 
     fs.mkdirSync(path.dirname(windowStatePath), { recursive: true });
     fs.writeFileSync(windowStatePath, JSON.stringify(state, null, 2));
@@ -175,14 +147,14 @@ function saveWindowState(window) {
 function createMainWindow() {
   const windowState = loadWindowState();
   const windowBounds = windowState?.bounds;
-  const contentSize = windowState?.contentSize;
+  let lastRestorableBounds = windowBounds;
+  let isTrackingWindowBounds = false;
   const mainWindow = new BrowserWindow({
     title: appName,
     x: windowBounds?.x,
     y: windowBounds?.y,
-    width: contentSize?.width ?? windowBounds?.width ?? defaultWindowWidth,
-    height: contentSize?.height ?? windowBounds?.height ?? defaultWindowHeight,
-    useContentSize: Boolean(contentSize),
+    width: windowBounds?.width ?? defaultWindowWidth,
+    height: windowBounds?.height ?? defaultWindowHeight,
     minWidth: minimumWindowWidth,
     minHeight: minimumWindowHeight,
     backgroundColor: '#0f172a',
@@ -205,11 +177,37 @@ function createMainWindow() {
   });
 
   mainWindow.once('ready-to-show', () => {
+    if (windowBounds) {
+      mainWindow.setBounds(windowBounds, false);
+    }
+
     mainWindow.show();
   });
 
+  mainWindow.once('show', () => {
+    // Ignore startup resize/move events caused by Electron applying native frame bounds.
+    setTimeout(() => {
+      isTrackingWindowBounds = true;
+    }, 500);
+  });
+
+  mainWindow.on('resize', () => {
+    if (isTrackingWindowBounds && hasRestorableWindowState(mainWindow)) {
+      lastRestorableBounds = getRestorableWindowBounds(mainWindow);
+    }
+  });
+
+  mainWindow.on('move', () => {
+    if (isTrackingWindowBounds && hasRestorableWindowState(mainWindow)) {
+      lastRestorableBounds = getRestorableWindowBounds(mainWindow);
+    }
+  });
+
   mainWindow.on('close', () => {
-    saveWindowState(mainWindow);
+    writeWindowState({
+      bounds: lastRestorableBounds ?? getRestorableWindowBounds(mainWindow),
+      maximized: mainWindow.isMaximized(),
+    });
   });
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
