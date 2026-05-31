@@ -118,15 +118,6 @@ function getRestorableWindowBounds(window) {
 }
 
 /**
- * Checks whether the window is in a normal state that should update restorable bounds.
- * @param {BrowserWindow} window - Window whose state should be checked.
- * @returns {boolean} True when current bounds are safe to persist.
- */
-function hasRestorableWindowState(window) {
-  return !window.isMaximized() && !window.isMinimized() && !window.isFullScreen();
-}
-
-/**
  * Persists the BrowserWindow size, position, and maximized state.
  * @param {{bounds: {x: number, y: number, width: number, height: number}, maximized: boolean}} state - Window state to persist.
  * @returns {void}
@@ -149,8 +140,6 @@ function writeWindowState(state) {
 function createMainWindow() {
   const windowState = loadWindowState();
   const windowBounds = windowState?.bounds;
-  let lastRestorableBounds = windowBounds;
-  let isTrackingWindowBounds = false;
   const mainWindow = new BrowserWindow({
     title: appName,
     x: windowBounds?.x,
@@ -186,28 +175,9 @@ function createMainWindow() {
     mainWindow.show();
   });
 
-  mainWindow.once('show', () => {
-    // Ignore startup resize/move events caused by Electron applying native frame bounds.
-    setTimeout(() => {
-      isTrackingWindowBounds = true;
-    }, 500);
-  });
-
-  mainWindow.on('resize', () => {
-    if (isTrackingWindowBounds && hasRestorableWindowState(mainWindow)) {
-      lastRestorableBounds = getRestorableWindowBounds(mainWindow);
-    }
-  });
-
-  mainWindow.on('move', () => {
-    if (isTrackingWindowBounds && hasRestorableWindowState(mainWindow)) {
-      lastRestorableBounds = getRestorableWindowBounds(mainWindow);
-    }
-  });
-
   mainWindow.on('close', () => {
     writeWindowState({
-      bounds: lastRestorableBounds ?? getRestorableWindowBounds(mainWindow),
+      bounds: getRestorableWindowBounds(mainWindow),
       maximized: mainWindow.isMaximized(),
     });
   });
