@@ -12,6 +12,16 @@ This software is provided as is for personal recordkeeping and calculation assis
 
 This app is a work in progress and is not even an alpha release. It may contain incomplete features, incorrect calculations, missing edge-case handling, or behavior that changes without notice. Do not rely on it as an authoritative source until you have independently verified the results.
 
+## Exchange Compatibility
+
+This app is only compatible with Crypto.com Exchange transaction reports. Its import, calculation, backup, and export flows are heavily based on that report file format, and unfortunately it is not compatible with transactions exported from any other exchange.
+
+In the future, the dataset and backup export format should be refactored so imported transactions are converted into an internal app transaction format. That would allow the app to support imports from different exchanges without tying the rest of the workflow to one exchange-specific CSV layout.
+
+## Note for Brazilian Users
+
+I'm sorry this app is currently written in English, even though it helps solve a problem that is especially relevant for Brazilian users. Multi-language support is planned for the future.
+
 ## Features
 
 - Import one or more Crypto.com transaction report CSV files.

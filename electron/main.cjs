@@ -1,10 +1,11 @@
-const { app, BrowserWindow, screen, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, screen, shell } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
 
 const appName = 'Crypto Average Price';
 const devServerUrl = process.env.ELECTRON_RENDERER_URL;
 const windowStateFileName = 'window-state.json';
+const zoomStateFileName = 'zoom-state.json';
 const defaultWindowWidth = 1440;
 const defaultWindowHeight = 900;
 const minimumWindowWidth = 1280;
@@ -12,6 +13,9 @@ const minimumWindowHeight = 720;
 const minimumSavedWindowWidth = 400;
 const minimumSavedWindowHeight = 300;
 const minimumVisibleWindowPixels = 100;
+const defaultZoomFactor = 1;
+const minimumZoomFactor = 0.75;
+const maximumZoomFactor = 1.5;
 
 /**
  * Resolves the renderer entry URL for development and packaged app modes.
@@ -31,6 +35,14 @@ function getRendererEntry() {
  */
 function getWindowStatePath() {
   return path.join(app.getPath('userData'), windowStateFileName);
+}
+
+/**
+ * Resolves the persisted zoom state file path under Electron app data.
+ * @returns {string} Absolute path to the zoom state JSON file.
+ */
+function getZoomStatePath() {
+  return path.join(app.getPath('userData'), zoomStateFileName);
 }
 
 /**
@@ -118,6 +130,15 @@ function getRestorableWindowBounds(window) {
 }
 
 /**
+ * Checks whether the current BrowserWindow state should update saved normal bounds.
+ * @param {BrowserWindow} window - Window whose state should be checked.
+ * @returns {boolean} True when current bounds are safe to use for normal restore.
+ */
+function canSaveCurrentWindowBounds(window) {
+  return !window.isMaximized() && !window.isMinimized() && !window.isFullScreen();
+}
+
+/**
  * Persists the BrowserWindow size, position, and maximized state.
  * @param {{bounds: {x: number, y: number, width: number, height: number}, maximized: boolean}} state - Window state to persist.
  * @returns {void}
@@ -134,12 +155,68 @@ function writeWindowState(state) {
 }
 
 /**
+ * Limits a zoom factor to the supported renderer zoom range.
+ * @param {number} zoomFactor - Requested zoom factor.
+ * @returns {number} Clamped zoom factor rounded to two decimals.
+ */
+function clampZoomFactor(zoomFactor) {
+  return Math.round(Math.min(maximumZoomFactor, Math.max(minimumZoomFactor, zoomFactor)) * 100) / 100;
+}
+
+/**
+ * Loads the persisted renderer zoom factor from disk.
+ * @returns {number} Saved zoom factor, or the default factor when unavailable.
+ */
+function loadZoomFactor() {
+  try {
+    const rawState = fs.readFileSync(getZoomStatePath(), 'utf8');
+    const state = JSON.parse(rawState);
+
+    if (!isFiniteNumber(state.zoomFactor)) {
+      return defaultZoomFactor;
+    }
+
+    return clampZoomFactor(state.zoomFactor);
+  } catch {
+    return defaultZoomFactor;
+  }
+}
+
+/**
+ * Persists the renderer zoom factor to disk.
+ * @param {number} zoomFactor - Zoom factor to persist.
+ * @returns {void}
+ */
+function writeZoomFactor(zoomFactor) {
+  try {
+    const zoomStatePath = getZoomStatePath();
+    const state = { zoomFactor: clampZoomFactor(zoomFactor) };
+
+    fs.mkdirSync(path.dirname(zoomStatePath), { recursive: true });
+    fs.writeFileSync(zoomStatePath, JSON.stringify(state, null, 2));
+  } catch {
+    // Zoom persistence is best-effort and should never interrupt app usage.
+  }
+}
+
+/**
+ * Sends the persisted renderer zoom factor to a BrowserWindow.
+ * @param {BrowserWindow} window - Window that should receive the zoom factor.
+ * @returns {void}
+ */
+function sendZoomFactor(window) {
+  window.webContents.send('app-zoom-factor', loadZoomFactor());
+}
+
+/**
  * Creates the main application window with secure renderer defaults.
  * @returns {BrowserWindow} The created Electron browser window.
  */
 function createMainWindow() {
   const windowState = loadWindowState();
   const windowBounds = windowState?.bounds;
+  let canTrackWindowBounds = false;
+  let lastRestorableBounds = windowBounds;
   const mainWindow = new BrowserWindow({
     title: appName,
     x: windowBounds?.x,
@@ -163,6 +240,7 @@ function createMainWindow() {
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
+      preload: path.join(__dirname, 'preload.cjs'),
       sandbox: true,
     },
   });
@@ -173,11 +251,25 @@ function createMainWindow() {
     }
 
     mainWindow.show();
+    sendZoomFactor(mainWindow);
+
+    setTimeout(() => {
+      canTrackWindowBounds = true;
+    }, 500);
   });
+
+  const rememberRestorableBounds = () => {
+    if (canTrackWindowBounds && canSaveCurrentWindowBounds(mainWindow)) {
+      lastRestorableBounds = getRestorableWindowBounds(mainWindow);
+    }
+  };
+
+  mainWindow.on('move', rememberRestorableBounds);
+  mainWindow.on('resize', rememberRestorableBounds);
 
   mainWindow.on('close', () => {
     writeWindowState({
-      bounds: getRestorableWindowBounds(mainWindow),
+      bounds: lastRestorableBounds ?? getRestorableWindowBounds(mainWindow),
       maximized: mainWindow.isMaximized(),
     });
   });
@@ -218,6 +310,12 @@ function createMainWindow() {
 
   return mainWindow;
 }
+
+ipcMain.on('app-zoom-factor-changed', (_event, zoomFactor) => {
+  if (isFiniteNumber(zoomFactor)) {
+    writeZoomFactor(zoomFactor);
+  }
+});
 
 app.setName(appName);
 
