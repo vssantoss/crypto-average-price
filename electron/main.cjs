@@ -9,6 +9,8 @@ const defaultWindowWidth = 1440;
 const defaultWindowHeight = 900;
 const minimumWindowWidth = 1280;
 const minimumWindowHeight = 720;
+const minimumSavedWindowWidth = 400;
+const minimumSavedWindowHeight = 300;
 const minimumVisibleWindowPixels = 100;
 
 /**
@@ -52,8 +54,8 @@ function hasValidWindowBounds(bounds) {
     && isFiniteNumber(bounds.y)
     && isFiniteNumber(bounds.width)
     && isFiniteNumber(bounds.height)
-    && bounds.width >= minimumWindowWidth
-    && bounds.height >= minimumWindowHeight,
+    && bounds.width >= minimumSavedWindowWidth
+    && bounds.height >= minimumSavedWindowHeight,
   );
 }
 
